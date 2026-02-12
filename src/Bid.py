@@ -54,8 +54,10 @@ class Bid(Bidder):
         self.weights_ctr = None
         self.weights_cvr = None
         
-        # SAFETY: Default intercepts to -4.0 (approx 1.8% prob) 
-        # Prevents bankruptcy if model file fails to load
+        # SAFETY: Default intercepts to -4.0 (approx 1.8% probability) 
+        # This fail-safe prevents the engine from bidding aggressively if the model file 
+        # cannot be loaded or is corrupted. It ensures we bid conservatively (~1.8% CTR/CVR)
+        # rather than randomly, protecting the budget in failure scenarios.
         self.intercept_ctr = -4.0 
         self.intercept_cvr = -4.0
 
@@ -129,15 +131,24 @@ class Bid(Bidder):
             avg_ev = float(stat["avg_ev"])
             if avg_ev <= 1e-9: avg_ev = 0.0001
             
+            # ---------------------------
             # Feature Extraction
+            # ---------------------------
+            # Extract raw features from the BidRequest object.
+            # We normalize strings to handle potential data inconsistencies (e.g., "NaN", "").
             ua = bidRequest.getUserAgent()
             region = self._norm(bidRequest.getRegion())
             city = self._norm(bidRequest.getCity())
             domain = self._norm(bidRequest.getDomain())
             vis = self._norm(bidRequest.getAdSlotVisibility())
             fmt = self._norm(bidRequest.getAdSlotFormat())
+            
+            # Parse User-Agent into OS and Browser tokens for better generalization
             os_t, br_t = self._parse_ua(ua)
             
+            # Construct feature strings for hashing.
+            # Format: "feature_name:feature_value"
+            # These strings are hashed into a fixed integer space (2^18) to serve as model inputs.
             features = [
                 f"ua_os:{os_t}", f"ua_browser:{br_t}",
                 f"region:{region}", f"city:{city}",
@@ -176,8 +187,15 @@ class Bid(Bidder):
             # ---------------------------
             # Adaptive Pacing
             # ---------------------------
-            # Estimate spend using a probabilistic win-rate model (20%) rather than raw bid value.
-            # This prevents premature throttling due to over-estimation of spend in second-price auctions.
+            # ---------------------------
+            # Adaptive Pacing Control (PID-like)
+            # ---------------------------
+            # To ensure the budget lasts throughout the entire campaign (25M requests), we implement
+            # a feedback loop that adjusts bidding aggression based on spend velocity.
+            #
+            # We track 'estimated_spend' using a probabilistic win-rate model (20%) rather than
+            # sum of raw bids. This is critical in second-price auctions where the actual payment is
+            # significantly lower than the bid price, and prevents premature throttling.
             self.estimated_spend += (raw_bid * self.ESTIMATED_WIN_RATE)
             
             ideal_spend = (self.requests_seen / self.EXPECTED_REQUESTS) * self.TOTAL_BUDGET

@@ -140,6 +140,9 @@ def init_db(path: str):
     cur.execute("CREATE TABLE clicks (bidid TEXT PRIMARY KEY)")
     cur.execute("CREATE TABLE convs (bidid TEXT PRIMARY KEY)")
     conn.commit()
+    # SQLite is used as a temporary, disk-backed index for join operations (Map-Side Join optimization).
+    # Since the dataset is too large to fit in memory (14M+ rows), we index rare events (clicks/conversions)
+    # first, then stream the massive impression log and check for existence against this index.
     return conn
 
 
@@ -309,6 +312,10 @@ def build_feature_matrix(rows, clicked_mask, conv_mask, stats_map):
 
     if not row_indices:
         return csr_matrix((n, HASH_SPACE), dtype=np.float32)
+    
+    # Construct a Coordinate Format (COO) sparse matrix which is efficient for incremental construction,
+    # then convert to CSR (Compressed Sparse Row) for fast arithmetic operations.
+    # The matrix shape is (batch_size, 2^18), representing the hashed feature space.
     X = csr_matrix(
         (np.array(data, dtype=np.float32), (np.array(row_indices), np.array(col_indices))),
         shape=(n, HASH_SPACE),
