@@ -162,6 +162,38 @@
             }],
             "title": "Average Latency",
             "type": "timeseries"
+        },
+        {
+            "datasource": "Prometheus",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "id": 4,
+            "title": "Effective Cost Per Click (eCPC)",
+            "type": "timeseries",
+            "targets": [{
+                "expr": "rate(rtb_estimated_spend[1m]) / rate(rtb_impressions_total[1m]) * 1000",
+                "legendFormat": "eCPM"
+            }]
+        },
+        {
+            "datasource": "Prometheus",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            },
+            "id": 5,
+            "title": "Win Rate",
+            "type": "timeseries",
+            "targets": [{
+                "expr": "rate(rtb_wins_total[1m]) / rate(rtb_requests_total[1m])",
+                "legendFormat": "Win Rate"
+            }]
         }
     ],
     "refresh": "5s",

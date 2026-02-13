@@ -8,25 +8,25 @@ The Nexus-RTB Engine is a high-performance, real-time bidding system designed to
 
 ```mermaid
 graph TD
-    A[Ad Exchange] -->|Bid Request (JSON)| B(FastAPI Server)
+    A[Ad Exchange] -->|Bid Request| B(FastAPI Server)
     B --> C{Bidding Engine}
 
-    subgraph Core Logic [src/bidding]
+    subgraph "Core Logic [src/bidding]"
     C -->|1. Validate| D[Validator]
-    C -->|2. Extract Features| E[Feature Extractor]
-    E -->|Hash| F[Hasher (Adler32/SHA256)]
-    C -->|3. Inference| G[LR Model (CTR/CVR)]
+    C -->|2. Extract| E[Feature Extractor]
+    E -->|Hash| F[Hasher]
+    C -->|3. Inference| G[LR Model]
     C -->|4. Valuation| H[EV Calculator]
     C -->|5. Pacing| I[PID Controller]
     end
 
-    subgraph Observability
+    subgraph "Observability"
     P[Prometheus] -->|Scrape /metrics| B
     Gr[Grafana] -->|Query| P
     end
 
-    G -->|Load Weights & Verify Sig| J[(model_weights.pkl)]
-    J -.-> K[model_weights.pkl.sig]
+    G -->|Load & Verify| J[(model_weights.pkl)]
+    J -.-> K[Signature Check]
     C -->|Bid Response| A
 ```
 

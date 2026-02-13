@@ -16,6 +16,15 @@ class PacingConfig:
     factor_cool_down: float = 0.80
     factor_speed_up: float = 1.15
     factor_steady: float = 1.00
+    
+    # PID factors
+    pacing_k_p: float = 0.05
+    pacing_k_i: float = 0.01
+    pacing_k_d: float = 0.005
+    
+    # Feature Flags / Canary
+    strategy_version: str = "v1" # v1=Stable, v2=Experimental
+    experiment_traffic: float = 0.1 # 10% traffic to v2
 
 @dataclass(frozen=True)
 class ModelConfig:
