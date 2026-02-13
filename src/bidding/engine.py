@@ -58,8 +58,9 @@ class BiddingEngine:
         adv_id = str(request.advertiserId)
         
         try:
-            # FIX 1 & 5: Circuit Breaker moved to atomic reservation
-            # Old can_bid check removed to prevent TOCTOU
+            # FIX: Pre-emptively check for HARD exhaustion
+            if self.pacing.is_exhausted():
+                return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="budget_exhausted")
 
             # FIX 2: Fail-Closed Model Loading
             if not self.model_loader.model_loaded:

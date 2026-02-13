@@ -65,11 +65,19 @@ class PacingController:
         with self._lock:
             return self._total_budget - self._spent_budget
 
+    def is_exhausted(self) -> bool:
+        """
+        Check if the global budget is fully exhausted.
+        This is the definitive HARD stop signal.
+        """
+        with self._lock:
+            return self._spent_budget >= self._total_budget
+
     def reserve_budget(self, amount: float) -> bool:
         """
         Atomically check and reserve budget.
-        Returns True if reservation succeeded, False if budget exhausted.
-        Replaces can_bid() + record_bid() to prevent TOCTOU race conditions.
+        STRICTLY enforces Hard Caps (Global & Daily).
+        Soft Caps (Hourly/Minute) do NOT block reservation, but are tracked.
         """
         with self._lock:
             # 1. Global Hard Cap
@@ -80,19 +88,13 @@ class PacingController:
             if self._spent_budget + amount > self.conf.max_daily_spend:
                 return False
 
-            # 3. Hourly Soft Cap
-            if self._hourly_spend + amount > self.conf.max_hourly_spend:
-                if time.time() - self._last_hour_reset < 3600:
-                    return False
-                else:
-                    self._reset_hourly()
+            # 3. Soft Cap Tracking (Hourly) - DOES NOT BLOCK
+            if time.time() - self._last_hour_reset > 3600:
+                self._reset_hourly()
 
-            # 4. Surge Protection (Minute Cap)
-            if self._minute_spend + amount > self.conf.max_minute_spend:
-                if time.time() - self._last_minute_reset < 60:
-                    return False
-                else:
-                    self._reset_minute()
+            # 4. Soft Cap Tracking (Minute) - DOES NOT BLOCK
+            if time.time() - self._last_minute_reset > 60:
+                self._reset_minute()
             
             # Commit Reservation
             self._spent_budget += amount
@@ -115,21 +117,12 @@ class PacingController:
             self._hourly_spend -= amount
             self._minute_spend -= amount
             
-            # Revert stats?
-            # We don't revert requests_seen as we did process it, just didn't bid.
-            # We might want to remove the '0' from win history if we didn't actually bid?
-            # Yes, pop the last '0'.
+            # Revert stats
             if self._win_history and self._win_history[-1] == 0:
                 self._win_history.pop()
                 self._decisions_total -= 1
 
-    def can_bid(self) -> bool:
-        """DEPRECATED: Use reserve_budget"""
-        return self.reserve_budget(0.0)
-
-    def record_bid(self, bid_price: float):
-        """DEPRECATED: Use reserve_budget"""
-        pass
+    # DEPRECATED methods removed completely per instructions.
 
     def record_win(self, price: float):
         """

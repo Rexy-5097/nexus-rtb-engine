@@ -75,6 +75,7 @@ def test_hourly_cap_concurrency():
     for t in threads:
         t.join()
         
+    # Soft Cap: Should NOT block. All 20 should succeed.
     success_count = sum(1 for r in results if r)
-    assert success_count == 10 # 10 * 50 = 500
-    assert pacer._hourly_spend == 500.0
+    assert success_count == 20 
+    assert pacer._hourly_spend == 1000.0 # Tracked correctly
