@@ -153,9 +153,6 @@ class BiddingEngine:
             latency_ms = (time.perf_counter() - start_time) * 1000
             return BidResponse(bidId=request.bidId, bidPrice=final_bid, advertiserId=adv_id, explanation=f"ok_lat={latency_ms:.3f}ms")
 
-            latency_ms = (time.perf_counter() - start_time) * 1000
-            return BidResponse(bidId=request.bidId, bidPrice=final_bid, advertiserId=adv_id, explanation=f"ok_lat={latency_ms:.3f}ms")
-
         except Exception as e:
             logger.error(f"Error processing bid {request.bidId}: {e}", exc_info=True)
             # Fail Closed
