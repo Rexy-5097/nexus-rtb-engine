@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from typing import Optional
 
+
 @dataclass(slots=True)
 class BidRequest:
     """
     Represents a Real-Time Bidding request with strict type hints.
     Using slots for memory efficiency and faster attribute access.
     """
+
     bidId: str
     timestamp: str
     visitorId: str
@@ -34,11 +36,13 @@ class BidRequest:
         # Detailed validation should happen in a separate validation layer.
         pass
 
+
 @dataclass(slots=True)
 class BidResponse:
     """
     Represents the decision made by the bidding engine.
     """
+
     bidId: str
     bidPrice: int
     advertiserId: str

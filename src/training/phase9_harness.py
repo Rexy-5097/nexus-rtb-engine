@@ -10,28 +10,38 @@ Phase 9: Institutional Validation & Research Packaging
 6. Production Risk Review
 7. Final Engine Report
 """
-import sys, os, warnings, logging, hashlib, json
-from datetime import datetime
+import hashlib
+import json
+import logging
+import os
+import sys
+import warnings
 from collections import deque
+from datetime import datetime
+
 import numpy as np
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.abspath("."))
 
-from sklearn.metrics import roc_auc_score, brier_score_loss
-from scipy.sparse import vstack
+from scipy.sparse import vstack  # noqa: E402
+from sklearn.metrics import brier_score_loss, roc_auc_score  # noqa: E402
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger(__name__)
 
-from src.training.train import load_dataset, build_matrix, FeatureExtractor, HASH_SPACE, calc_ece
-from src.bidding.config import config
-from src.utils.hashing import hash_feature
+from src.bidding.config import config  # noqa: E402
+from src.training.train import (HASH_SPACE, FeatureExtractor,  # noqa: E402
+                                build_matrix, calc_ece, load_dataset)
+from src.utils.hashing import hash_feature  # noqa: E402
 
 try:
     import lightgbm as lgb
 except ImportError:
     lgb = None
+
 
 # ──────────────────── FEATURE NAME MAP ────────────────────
 # Build a reverse map: hash_index → human-readable name
@@ -42,13 +52,38 @@ def build_feature_name_map():
 
     # Categorical features (common values)
     cat_features = [
-        "ua_os:windows", "ua_os:linux", "ua_os:mac", "ua_os:android", "ua_os:ios", "ua_os:other",
-        "ua_browser:chrome", "ua_browser:firefox", "ua_browser:safari", "ua_browser:ie", "ua_browser:other",
-        "advertiser:1458", "advertiser:3358", "advertiser:3386", "advertiser:3476", "advertiser:tail",
-        "domain:example.com", "domain:news.com", "domain:tech.org", "domain:tail",
-        "region:1", "region:2", "region:3", "region:tail",
-        "city:1", "city:2", "city:tail",
-        "floor_bucket:0", "floor_bucket:1-10", "floor_bucket:10-50", "floor_bucket:50-100", "floor_bucket:100+",
+        "ua_os:windows",
+        "ua_os:linux",
+        "ua_os:mac",
+        "ua_os:android",
+        "ua_os:ios",
+        "ua_os:other",
+        "ua_browser:chrome",
+        "ua_browser:firefox",
+        "ua_browser:safari",
+        "ua_browser:ie",
+        "ua_browser:other",
+        "advertiser:1458",
+        "advertiser:3358",
+        "advertiser:3386",
+        "advertiser:3476",
+        "advertiser:tail",
+        "domain:example.com",
+        "domain:news.com",
+        "domain:tech.org",
+        "domain:tail",
+        "region:1",
+        "region:2",
+        "region:3",
+        "region:tail",
+        "city:1",
+        "city:2",
+        "city:tail",
+        "floor_bucket:0",
+        "floor_bucket:1-10",
+        "floor_bucket:10-50",
+        "floor_bucket:50-100",
+        "floor_bucket:100+",
     ]
     for h in range(24):
         cat_features.append(f"hour:{h}")
@@ -71,12 +106,26 @@ def build_feature_name_map():
 
     # Numeric features
     numeric_names = [
-        "region", "city", "adslot_visibility", "adslot_format", "ad_slot_area",
-        "stat_adv_ctr", "stat_adv_dom_ctr",
-        "adv_ctr_1d", "adv_ctr_7d", "dom_ctr_1d", "dom_ctr_7d",
-        "adv_win_rate", "adv_avg_cpm", "slot_ctr",
-        "ua_entropy", "hour_sin", "hour_cos",
-        "domain_freq", "user_ctr", "user_click_count_7d",
+        "region",
+        "city",
+        "adslot_visibility",
+        "adslot_format",
+        "ad_slot_area",
+        "stat_adv_ctr",
+        "stat_adv_dom_ctr",
+        "adv_ctr_1d",
+        "adv_ctr_7d",
+        "dom_ctr_1d",
+        "dom_ctr_7d",
+        "adv_win_rate",
+        "adv_avg_cpm",
+        "slot_ctr",
+        "ua_entropy",
+        "hour_sin",
+        "hour_cos",
+        "domain_freq",
+        "user_ctr",
+        "user_click_count_7d",
     ]
     for name in numeric_names:
         h = hash_feature(name, hash_space)
@@ -85,7 +134,9 @@ def build_feature_name_map():
 
     return fmap
 
+
 FEATURE_NAME_MAP = build_feature_name_map()
+
 
 def resolve_name(idx):
     return FEATURE_NAME_MAP.get(idx, f"hash_{idx}")
@@ -98,9 +149,9 @@ def prepare_data():
     fe.set_encoding_maps(top_k_maps)
     X_parts, y_ctr_parts, y_cvr_parts = [], [], []
     for start in range(0, len(full_df), 100000):
-        chunk = full_df.iloc[start:start+100000]
-        c = chunk['click'].values.astype(np.int8)
-        v = chunk['conversion'].values.astype(np.int8)
+        chunk = full_df.iloc[start : start + 100000]
+        c = chunk["click"].values.astype(np.int8)
+        v = chunk["conversion"].values.astype(np.int8)
         rows = [r for r in chunk.itertuples(index=False)]
         mat = build_matrix(rows, c, v, global_stats, fe, scaler)
         if mat is not None:
@@ -110,29 +161,50 @@ def prepare_data():
     X = vstack(X_parts)
     y_ctr = np.concatenate(y_ctr_parts)
     y_cvr = np.concatenate(y_cvr_parts)
-    prices = full_df['payingprice'].values.astype(float)
+    prices = full_df["payingprice"].values.astype(float)
     return X, y_ctr, y_cvr, prices, scaler, stats, top_k_maps, full_df
 
+
 def auc_safe(y, p):
-    try: return roc_auc_score(y, p)
-    except: return 0.5
+    try:
+        return roc_auc_score(y, p)
+    except:
+        return 0.5
+
 
 def train_lgbm(X_tr, y_tr, X_va, y_va, params, spw=1.0):
-    full_params = dict(objective='binary', metric='auc', verbose=-1, scale_pos_weight=spw, **params)
+    full_params = dict(
+        objective="binary", metric="auc", verbose=-1, scale_pos_weight=spw, **params
+    )
     m = lgb.LGBMClassifier(**full_params)
-    m.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], eval_metric='auc',
-          callbacks=[lgb.early_stopping(30, verbose=False)])
+    m.fit(
+        X_tr,
+        y_tr,
+        eval_set=[(X_va, y_va)],
+        eval_metric="auc",
+        callbacks=[lgb.early_stopping(30, verbose=False)],
+    )
     return m
 
+
 BASE_PARAMS = {
-    "n_estimators": 300, "learning_rate": 0.03, "num_leaves": 15,
-    "max_depth": 4, "min_data_in_leaf": 200, "feature_fraction": 0.7,
-    "bagging_fraction": 0.8, "bagging_freq": 5, "lambda_l1": 10.0, "lambda_l2": 10.0,
+    "n_estimators": 300,
+    "learning_rate": 0.03,
+    "num_leaves": 15,
+    "max_depth": 4,
+    "min_data_in_leaf": 200,
+    "feature_fraction": 0.7,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 5,
+    "lambda_l1": 10.0,
+    "lambda_l2": 10.0,
 }
+
 
 def calc_roi(clicks, convs, spend):
     value = clicks * config.value_click + convs * config.value_conversion
     return value / max(spend, 1)
+
 
 def sim_backtest(pCTR, prices, y_click, y_conv, ev_percentile=70, use_dynamic=True):
     """Run economic backtest and return metrics dict."""
@@ -162,18 +234,23 @@ def sim_backtest(pCTR, prices, y_click, y_conv, ev_percentile=70, use_dynamic=Tr
             window.append((mp, val))
         else:
             window.append((0, 0))
-        if use_dynamic and len(window) == 1000 and (i+1) % 100 == 0:
+        if use_dynamic and len(window) == 1000 and (i + 1) % 100 == 0:
             ts = sum(s for s, _ in window)
             tv = sum(v for _, v in window)
             mr = tv / max(ts, 1)
-            if mr < 0.4: bid_mult = max(0.5, bid_mult * 0.9)
-            elif mr > 1.2: bid_mult = min(2.0, bid_mult * 1.05)
+            if mr < 0.4:
+                bid_mult = max(0.5, bid_mult * 0.9)
+            elif mr > 1.2:
+                bid_mult = min(2.0, bid_mult * 1.05)
 
     n_total = len(prices)
     return {
         "roi": calc_roi(clicks, convs, spend),
-        "wins": wins, "clicks": clicks, "convs": convs,
-        "spend": spend, "budget_util": spend / BUDGET,
+        "wins": wins,
+        "clicks": clicks,
+        "convs": convs,
+        "spend": spend,
+        "budget_util": spend / BUDGET,
         "win_rate": wins / max(n_total, 1),
     }
 
@@ -199,8 +276,12 @@ def task1_ablation(X, y_ctr, y_cvr, prices):
     model = train_lgbm(X_tr, y_tr, X_te, y_te, BASE_PARAMS, spw)
     pCTR_full = model.predict_proba(X_te)[:, 1]
     full_auc = auc_safe(y_te, pCTR_full)
-    full_bt = sim_backtest(pCTR_full, prices_te, y_click_te, y_conv_te, ev_percentile=70, use_dynamic=True)
-    logger.info(f"  FULL MODEL: AUC={full_auc:.4f}, ROI={full_bt['roi']:.4f}, WinRate={full_bt['win_rate']:.4f}")
+    full_bt = sim_backtest(
+        pCTR_full, prices_te, y_click_te, y_conv_te, ev_percentile=70, use_dynamic=True
+    )
+    logger.info(
+        f"  FULL MODEL: AUC={full_auc:.4f}, ROI={full_bt['roi']:.4f}, WinRate={full_bt['win_rate']:.4f}"
+    )
 
     ablations = {}
 
@@ -208,11 +289,25 @@ def task1_ablation(X, y_ctr, y_cvr, prices):
     numeric_feature_hashes = {}
     hash_space = config.model.hash_space
     for name in [
-            "stat_adv_ctr", "stat_adv_dom_ctr", "adv_ctr_1d", "adv_ctr_7d",
-            "dom_ctr_1d", "dom_ctr_7d", "adv_win_rate", "adv_avg_cpm", "slot_ctr",
-            "user_ctr", "user_click_count_7d", "domain_freq",
-            "ua_entropy", "hour_sin", "hour_cos",
-            "ad_slot_area", "adslot_visibility", "adslot_format"]:
+        "stat_adv_ctr",
+        "stat_adv_dom_ctr",
+        "adv_ctr_1d",
+        "adv_ctr_7d",
+        "dom_ctr_1d",
+        "dom_ctr_7d",
+        "adv_win_rate",
+        "adv_avg_cpm",
+        "slot_ctr",
+        "user_ctr",
+        "user_click_count_7d",
+        "domain_freq",
+        "ua_entropy",
+        "hour_sin",
+        "hour_cos",
+        "ad_slot_area",
+        "adslot_visibility",
+        "adslot_format",
+    ]:
         h = hash_feature(name, hash_space)
         numeric_feature_hashes[name] = h
 
@@ -230,7 +325,9 @@ def task1_ablation(X, y_ctr, y_cvr, prices):
     for name in ["stat_adv_ctr", "stat_adv_dom_ctr"]:
         bayesian_hashes.add(hash_feature(name, hash_space))
 
-    def run_ablation(label, drop_hashes=None, ev_pct=70, use_dyn=True, use_raw_preds=False):
+    def run_ablation(
+        label, drop_hashes=None, ev_pct=70, use_dyn=True, use_raw_preds=False
+    ):
         """Run ablation by zeroing features or adjusting backtest params."""
         if drop_hashes and not use_raw_preds:
             X_mod = X_te.copy().tolil()
@@ -242,10 +339,24 @@ def task1_ablation(X, y_ctr, y_cvr, prices):
         else:
             preds = pCTR_full
         auc = auc_safe(y_te, preds)
-        bt = sim_backtest(preds, prices_te, y_click_te, y_conv_te, ev_percentile=ev_pct, use_dynamic=use_dyn)
-        roi_drop = full_bt['roi'] - bt['roi']
-        logger.info(f"  {label:<35s} AUC={auc:.4f}  ROI={bt['roi']:.4f}  WinRate={bt['win_rate']:.4f}  ROI_Drop={roi_drop:+.4f}")
-        ablations[label] = {"auc": auc, "roi": bt['roi'], "win_rate": bt['win_rate'], "roi_drop": roi_drop}
+        bt = sim_backtest(
+            preds,
+            prices_te,
+            y_click_te,
+            y_conv_te,
+            ev_percentile=ev_pct,
+            use_dynamic=use_dyn,
+        )
+        roi_drop = full_bt["roi"] - bt["roi"]
+        logger.info(
+            f"  {label:<35s} AUC={auc:.4f}  ROI={bt['roi']:.4f}  WinRate={bt['win_rate']:.4f}  ROI_Drop={roi_drop:+.4f}"
+        )
+        ablations[label] = {
+            "auc": auc,
+            "roi": bt["roi"],
+            "win_rate": bt["win_rate"],
+            "roi_drop": roi_drop,
+        }
 
     # a) Remove calibration → use raw predictions (no isotonic)
     run_ablation("w/o Calibration", use_raw_preds=True)
@@ -267,11 +378,24 @@ def task1_ablation(X, y_ctr, y_cvr, prices):
 
     # g) Remove price regression (bid = flat, no EV)
     flat_bid = np.full(len(prices_te), np.median(prices_te))
-    flat_bt = sim_backtest(flat_bid / config.value_click, prices_te, y_click_te, y_conv_te, ev_percentile=0, use_dynamic=False)
-    flat_auc = 0.5  # Random
-    roi_drop = full_bt['roi'] - flat_bt['roi']
-    logger.info(f"  {'w/o Price Model (flat bid)':<35s} AUC=0.5000  ROI={flat_bt['roi']:.4f}  WinRate={flat_bt['win_rate']:.4f}  ROI_Drop={roi_drop:+.4f}")
-    ablations["w/o Price Model (flat bid)"] = {"auc": 0.5, "roi": flat_bt['roi'], "win_rate": flat_bt['win_rate'], "roi_drop": roi_drop}
+    flat_bt = sim_backtest(
+        flat_bid / config.value_click,
+        prices_te,
+        y_click_te,
+        y_conv_te,
+        ev_percentile=0,
+        use_dynamic=False,
+    )
+    roi_drop = full_bt["roi"] - flat_bt["roi"]
+    logger.info(
+        f"  {'w/o Price Model (flat bid)':<35s} AUC=0.5000  ROI={flat_bt['roi']:.4f}  WinRate={flat_bt['win_rate']:.4f}  ROI_Drop={roi_drop:+.4f}"
+    )
+    ablations["w/o Price Model (flat bid)"] = {
+        "auc": 0.5,
+        "roi": flat_bt["roi"],
+        "win_rate": flat_bt["win_rate"],
+        "roi_drop": roi_drop,
+    }
 
     # Rank by ROI drop
     ranked = sorted(ablations.items(), key=lambda x: x[1]["roi_drop"], reverse=True)
@@ -279,7 +403,11 @@ def task1_ablation(X, y_ctr, y_cvr, prices):
     for rank, (name, m) in enumerate(ranked, 1):
         logger.info(f"    {rank}. {name:<35s} ROI_Drop={m['roi_drop']:+.4f}")
 
-    return {"full": {"auc": full_auc, **full_bt}, "ablations": ablations, "ranked": [r[0] for r in ranked]}
+    return {
+        "full": {"auc": full_auc, **full_bt},
+        "ablations": ablations,
+        "ranked": [r[0] for r in ranked],
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -308,8 +436,17 @@ def task2_shap(X, y_ctr, y_cvr):
     for rank, idx in enumerate(top_idx, 1):
         name = resolve_name(idx)
         pct = fi[idx] / max(total_importance, 1) * 100
-        logger.info(f"    {rank:>2}. {name:<35s}  importance={fi[idx]:>5}  ({pct:.1f}%)")
-        shap_results.append({"rank": rank, "feature": name, "importance": int(fi[idx]), "pct": round(pct, 1)})
+        logger.info(
+            f"    {rank:>2}. {name:<35s}  importance={fi[idx]:>5}  ({pct:.1f}%)"
+        )
+        shap_results.append(
+            {
+                "rank": rank,
+                "feature": name,
+                "importance": int(fi[idx]),
+                "pct": round(pct, 1),
+            }
+        )
 
     # CVR model
     click_mask = y_ctr[:n_train] == 1
@@ -322,7 +459,9 @@ def task2_shap(X, y_ctr, y_cvr):
     cvr_shap = []
     if X_cvr_tr.shape[0] > 50 and y_cvr_tr.sum() > 5:
         spw_cvr = (1.0 - y_cvr_tr.mean()) / (y_cvr_tr.mean() + 1e-6)
-        cvr_model = train_lgbm(X_cvr_tr, y_cvr_tr, X_cvr_te, y_cvr_te, BASE_PARAMS, spw_cvr)
+        cvr_model = train_lgbm(
+            X_cvr_tr, y_cvr_tr, X_cvr_te, y_cvr_te, BASE_PARAMS, spw_cvr
+        )
         fi_cvr = cvr_model.feature_importances_
         top_cvr = np.argsort(fi_cvr)[::-1][:15]
         total_cvr = fi_cvr.sum()
@@ -330,8 +469,17 @@ def task2_shap(X, y_ctr, y_cvr):
         for rank, idx in enumerate(top_cvr, 1):
             name = resolve_name(idx)
             pct = fi_cvr[idx] / max(total_cvr, 1) * 100
-            logger.info(f"    {rank:>2}. {name:<35s}  importance={fi_cvr[idx]:>5}  ({pct:.1f}%)")
-            cvr_shap.append({"rank": rank, "feature": name, "importance": int(fi_cvr[idx]), "pct": round(pct, 1)})
+            logger.info(
+                f"    {rank:>2}. {name:<35s}  importance={fi_cvr[idx]:>5}  ({pct:.1f}%)"
+            )
+            cvr_shap.append(
+                {
+                    "rank": rank,
+                    "feature": name,
+                    "importance": int(fi_cvr[idx]),
+                    "pct": round(pct, 1),
+                }
+            )
 
     return {"ctr_features": shap_results, "cvr_features": cvr_shap}
 
@@ -356,7 +504,7 @@ def task3_capital_allocation(X, y_ctr, y_cvr, prices):
     model = train_lgbm(X_tr, y_tr, X_te, y_te, BASE_PARAMS, spw)
     pCTR = model.predict_proba(X_te)[:, 1]
     ev = pCTR * config.value_click
-    BUDGET = float(prices_te.sum()) * 0.8
+    float(prices_te.sum()) * 0.8
 
     # Distributions
     ev_pcts = [10, 25, 50, 75, 90]
@@ -370,21 +518,27 @@ def task3_capital_allocation(X, y_ctr, y_cvr, prices):
 
     # Spend vs ROI curve at different EV thresholds
     logger.info("\n  Spend vs ROI Curve (by EV percentile threshold):")
-    logger.info(f"  {'Percentile':<12} {'ROI':<10} {'WinRate':<10} {'BudgetUtil':<12} {'Clicks':<8} {'Convs'}")
+    logger.info(
+        f"  {'Percentile':<12} {'ROI':<10} {'WinRate':<10} {'BudgetUtil':<12} {'Clicks':<8} {'Convs'}"
+    )
     peak_roi = 0
     peak_pct = 0
     neg_marginal_pct = None
     prev_roi = 0
 
     for pct in range(0, 100, 5):
-        bt = sim_backtest(pCTR, prices_te, y_click_te, y_conv_te, ev_percentile=pct, use_dynamic=False)
-        logger.info(f"  P{pct:<10} {bt['roi']:<10.4f} {bt['win_rate']:<10.4f} {bt['budget_util']:<12.4f} {bt['clicks']:<8} {bt['convs']}")
-        if bt['roi'] > peak_roi:
-            peak_roi = bt['roi']
+        bt = sim_backtest(
+            pCTR, prices_te, y_click_te, y_conv_te, ev_percentile=pct, use_dynamic=False
+        )
+        logger.info(
+            f"  P{pct:<10} {bt['roi']:<10.4f} {bt['win_rate']:<10.4f} {bt['budget_util']:<12.4f} {bt['clicks']:<8} {bt['convs']}"
+        )
+        if bt["roi"] > peak_roi:
+            peak_roi = bt["roi"]
             peak_pct = pct
-        if pct > 0 and bt['roi'] < prev_roi and neg_marginal_pct is None:
+        if pct > 0 and bt["roi"] < prev_roi and neg_marginal_pct is None:
             neg_marginal_pct = pct
-        prev_roi = bt['roi']
+        prev_roi = bt["roi"]
 
     logger.info(f"\n  📈 ROI peaks at P{peak_pct} = {peak_roi:.4f}")
     if neg_marginal_pct:
@@ -392,7 +546,11 @@ def task3_capital_allocation(X, y_ctr, y_cvr, prices):
     else:
         logger.info("  📈 Marginal ROI stays positive across all thresholds")
 
-    return {"peak_pct": peak_pct, "peak_roi": peak_roi, "neg_marginal_pct": neg_marginal_pct}
+    return {
+        "peak_pct": peak_pct,
+        "peak_roi": peak_roi,
+        "neg_marginal_pct": neg_marginal_pct,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -413,14 +571,21 @@ def task4_governance(X, y_ctr, prices, shap_results):
     auc = auc_safe(y_te, preds)
     ece = calc_ece(y_te, preds)
     brier = brier_score_loss(y_te, preds)
-    bt = sim_backtest(preds, prices[n_train:], y_ctr[n_train:], np.zeros(n - n_train), ev_percentile=70, use_dynamic=True)
+    bt = sim_backtest(
+        preds,
+        prices[n_train:],
+        y_ctr[n_train:],
+        np.zeros(n - n_train),
+        ev_percentile=70,
+        use_dynamic=True,
+    )
 
     # Model checksum
     model_path = "src/model_weights.pkl"
     if os.path.exists(model_path):
         with open(model_path, "rb") as f:
             checksum = hashlib.sha256(f.read()).hexdigest()[:16]
-        model_size = os.path.getsize(model_path) / (1024*1024)
+        model_size = os.path.getsize(model_path) / (1024 * 1024)
     else:
         checksum = "N/A"
         model_size = 0
@@ -438,9 +603,9 @@ def task4_governance(X, y_ctr, prices, shap_results):
             "ctr_auc": round(auc, 4),
             "ece": round(ece, 4),
             "brier": round(brier, 4),
-            "roi": round(bt['roi'], 4),
-            "win_rate": round(bt['win_rate'], 4),
-            "budget_utilization": round(bt['budget_util'], 4),
+            "roi": round(bt["roi"], 4),
+            "win_rate": round(bt["win_rate"], 4),
+            "budget_utilization": round(bt["budget_util"], 4),
         },
         "top_features": shap_results.get("ctr_features", [])[:5],
         "model_checksum_sha256": checksum,
@@ -512,44 +677,44 @@ def task6_risk_review():
             "impact": "Bids become unprofitable — overbidding or underbidding",
             "probability": "Low",
             "mitigation": "• Fallback to EV-only bidding (no market price cap)\n"
-                          "• Engine already has try/except with p_ctr_model = 0.001 fallback\n"
-                          "• Profit-Aware Cap prevents bids > 1.5x estimated market price",
+            "• Engine already has try/except with p_ctr_model = 0.001 fallback\n"
+            "• Profit-Aware Cap prevents bids > 1.5x estimated market price",
         },
         {
             "failure_mode": "CTR model collapses (AUC → 0.5)",
             "impact": "No bid selectivity — ROI drops to constant-bidding level",
             "probability": "Medium (data drift)",
             "mitigation": "• PSI drift detector (threshold 0.2) triggers alert\n"
-                          "• Automatic retraining pipeline on PSI breach\n"
-                          "• Model rollback to last known-good version\n"
-                          "• Quality gate (EV < threshold → skip) still limits exposure",
+            "• Automatic retraining pipeline on PSI breach\n"
+            "• Model rollback to last known-good version\n"
+            "• Quality gate (EV < threshold → skip) still limits exposure",
         },
         {
             "failure_mode": "CVR miscalibrates (overestimates conversions)",
             "impact": "Overpaying for low-conversion inventory → ROI erosion",
             "probability": "Medium",
             "mitigation": "• Variance-aware confidence penalty for low-count advertisers\n"
-                          "• Isotonic calibration layer corrects systematic bias\n"
-                          "• Bayesian smoothing priors prevent extreme predictions\n"
-                          "• ECE monitoring dashboard",
+            "• Isotonic calibration layer corrects systematic bias\n"
+            "• Bayesian smoothing priors prevent extreme predictions\n"
+            "• ECE monitoring dashboard",
         },
         {
             "failure_mode": "Capital runaway (spending entire budget too fast)",
             "impact": "Budget exhausted in first half of day → missed opportunities",
             "probability": "Low",
             "mitigation": "• PID pacing controller with velocity tracking\n"
-                          "• Dynamic bid multiplier reduces bids when marginal ROI < 0.4\n"
-                          "• Budget reservation system with refunds\n"
-                          "• Hard exhaustion circuit breaker",
+            "• Dynamic bid multiplier reduces bids when marginal ROI < 0.4\n"
+            "• Budget reservation system with refunds\n"
+            "• Hard exhaustion circuit breaker",
         },
         {
             "failure_mode": "Data leakage (future data in training)",
             "impact": "Inflated offline metrics → model fails in production",
             "probability": "Very Low",
             "mitigation": "• Time-based train/test splits (no random shuffling)\n"
-                          "• Rolling statistics use point-in-time computation\n"
-                          "• K-fold uses expanding window (never future data)\n"
-                          "• User signals computed cumulatively with time sort",
+            "• Rolling statistics use point-in-time computation\n"
+            "• K-fold uses expanding window (never future data)\n"
+            "• User signals computed cumulatively with time sort",
         },
     ]
 
@@ -557,7 +722,9 @@ def task6_risk_review():
         logger.info(f"\n  ⚠️  {r['failure_mode']}")
         logger.info(f"     Impact: {r['impact']}")
         logger.info(f"     Probability: {r['probability']}")
-        logger.info(f"     Mitigation:\n       {r['mitigation'].replace(chr(10), chr(10) + '       ')}")
+        logger.info(
+            f"     Mitigation:\n       {r['mitigation'].replace(chr(10), chr(10) + '       ')}"
+        )
 
     return risks
 
@@ -595,9 +762,15 @@ def main():
     logger.info("\n" + "=" * 65)
     logger.info("PHASE 9 COMPLETE — All validation tasks executed")
     logger.info("=" * 65)
-    logger.info(f"  Ablation components ranked: {', '.join(ablation_results['ranked'][:3])}")
-    logger.info(f"  Top CTR feature: {shap_results['ctr_features'][0]['feature'] if shap_results['ctr_features'] else 'N/A'}")
-    logger.info(f"  ROI peaks at P{capital_results['peak_pct']} = {capital_results['peak_roi']:.4f}")
+    logger.info(
+        f"  Ablation components ranked: {', '.join(ablation_results['ranked'][:3])}"
+    )
+    logger.info(
+        f"  Top CTR feature: {shap_results['ctr_features'][0]['feature'] if shap_results['ctr_features'] else 'N/A'}"
+    )
+    logger.info(
+        f"  ROI peaks at P{capital_results['peak_pct']} = {capital_results['peak_roi']:.4f}"
+    )
     logger.info(f"  Model version: {metadata['model_version']}")
     logger.info(f"  Risks documented: {len(risks)}")
 

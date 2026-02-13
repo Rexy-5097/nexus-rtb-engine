@@ -1,15 +1,16 @@
 import hashlib
 import hmac
-import os
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
 
 class ModelIntegrity:
     """
     Utilities for model signature verification to prevent tampering.
     """
-    
+
     @staticmethod
     def compute_hash(file_path: str) -> str:
         """Compute SHA256 hash of a file."""
@@ -30,17 +31,19 @@ class ModelIntegrity:
         if not os.path.exists(model_path) or not os.path.exists(sig_path):
             logger.error("Model or signature file missing.")
             return False
-            
+
         try:
             computed_hash = ModelIntegrity.compute_hash(model_path)
             with open(sig_path, "r") as f:
                 stored_hash = f.read().strip()
-                
+
             # Constant time comparison to avoid timing attacks (though strictly more relevant for HMAC)
             if hmac.compare_digest(computed_hash, stored_hash):
                 return True
             else:
-                logger.critical(f"Hash mismatch! Computed: {computed_hash}, Expected: {stored_hash}")
+                logger.critical(
+                    f"Hash mismatch! Computed: {computed_hash}, Expected: {stored_hash}"
+                )
                 return False
         except Exception as e:
             logger.error(f"Error validating signature: {e}")

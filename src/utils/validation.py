@@ -1,29 +1,35 @@
 from typing import Optional
+
 from src.bidding.config import config
+
 
 class Validator:
     """
     Input validation utilities to prevent DoS attacks and malformed requests.
     """
-    
+
     @staticmethod
-    def sanitize_string(s: Optional[str], max_len: int = config.max_string_length, default: str = "unknown") -> str:
+    def sanitize_string(
+        s: Optional[str],
+        max_len: int = config.max_string_length,
+        default: str = "unknown",
+    ) -> str:
         """
         Sanitize and truncate string inputs.
         Prevents memory exhaustion attacks via excessively long strings.
         """
         if not s:
             return default
-        
+
         # Strip whitespace and truncate
         s = str(s).strip()
         if len(s) > max_len:
             # Log warning in production here
             return s[:max_len]
-        
+
         if not s or s.lower() == "nan":
             return default
-            
+
         return s
 
     @staticmethod

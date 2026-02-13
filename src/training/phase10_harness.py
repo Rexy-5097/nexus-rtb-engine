@@ -8,26 +8,35 @@ Phase 10: Institutional-Grade Optimization
 4. Competitor Modeling (Win-Prob + Bid Shading)
 5. Shadow Deployment Harness (24h Campaign Simulation)
 """
-import sys, os, warnings, logging
-import numpy as np
+import logging
+import os
+import sys
+import warnings
 from collections import deque
-from scipy.sparse import vstack
-from scipy import stats as sp_stats
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+import numpy as np
+from scipy import stats as sp_stats
+from scipy.sparse import vstack
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.abspath("."))
 
-from sklearn.metrics import roc_auc_score
-from src.training.train import load_dataset, build_matrix, FeatureExtractor
-from src.bidding.config import config
+from sklearn.metrics import roc_auc_score  # noqa: E402
+
+from src.bidding.config import config  # noqa: E402
+from src.training.train import (FeatureExtractor, build_matrix,  # noqa: E402
+                                load_dataset)
 
 try:
     import lightgbm as lgb
 except ImportError:
     lgb = None
+
 
 # ──────────────────── HELPERS ────────────────────
 def prepare_data():
@@ -36,9 +45,9 @@ def prepare_data():
     fe.set_encoding_maps(top_k_maps)
     X_parts, y_ctr_parts, y_cvr_parts = [], [], []
     for start in range(0, len(full_df), 100000):
-        chunk = full_df.iloc[start:start+100000]
-        c = chunk['click'].values.astype(np.int8)
-        v = chunk['conversion'].values.astype(np.int8)
+        chunk = full_df.iloc[start : start + 100000]
+        c = chunk["click"].values.astype(np.int8)
+        v = chunk["conversion"].values.astype(np.int8)
         rows = [r for r in chunk.itertuples(index=False)]
         mat = build_matrix(rows, c, v, global_stats, fe, scaler)
         if mat is not None:
@@ -48,28 +57,46 @@ def prepare_data():
     X = vstack(X_parts)
     y_ctr = np.concatenate(y_ctr_parts)
     y_cvr = np.concatenate(y_cvr_parts)
-    prices = full_df['payingprice'].values.astype(float)
+    prices = full_df["payingprice"].values.astype(float)
     return X, y_ctr, y_cvr, prices, scaler, stats, top_k_maps, full_df
 
+
 def auc_safe(y, p):
-    try: return roc_auc_score(y, p)
-    except: return 0.5
+    try:
+        return roc_auc_score(y, p)
+    except:
+        return 0.5
+
 
 BASE_PARAMS = {
-    "n_estimators": 300, "learning_rate": 0.03, "num_leaves": 15,
-    "max_depth": 4, "min_data_in_leaf": 200, "feature_fraction": 0.7,
-    "bagging_fraction": 0.8, "bagging_freq": 5, "lambda_l1": 10.0, "lambda_l2": 10.0,
+    "n_estimators": 300,
+    "learning_rate": 0.03,
+    "num_leaves": 15,
+    "max_depth": 4,
+    "min_data_in_leaf": 200,
+    "feature_fraction": 0.7,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 5,
+    "lambda_l1": 10.0,
+    "lambda_l2": 10.0,
 }
 
+
 def train_lgbm(X_tr, y_tr, X_va, y_va, params, spw=1.0, init_model=None):
-    full_params = dict(objective='binary', metric='auc', verbose=-1, scale_pos_weight=spw, **params)
+    full_params = dict(
+        objective="binary", metric="auc", verbose=-1, scale_pos_weight=spw, **params
+    )
     m = lgb.LGBMClassifier(**full_params)
-    fit_kwargs = dict(eval_set=[(X_va, y_va)], eval_metric='auc',
-                      callbacks=[lgb.early_stopping(30, verbose=False)])
+    fit_kwargs = dict(
+        eval_set=[(X_va, y_va)],
+        eval_metric="auc",
+        callbacks=[lgb.early_stopping(30, verbose=False)],
+    )
     if init_model is not None:
-        fit_kwargs['init_model'] = init_model
+        fit_kwargs["init_model"] = init_model
     m.fit(X_tr, y_tr, **fit_kwargs)
     return m
+
 
 def calc_roi(clicks, convs, spend):
     value = clicks * config.value_click + convs * config.value_conversion
@@ -88,7 +115,7 @@ def task1_counterfactual(X, y_ctr, prices):
     n_train = int(n * 0.7)
     X_tr, y_tr = X[:n_train], y_ctr[:n_train]
     X_te, y_te = X[n_train:], y_ctr[n_train:]
-    prices_te = prices[n_train:]
+    prices[n_train:]
     spw = (1.0 - y_tr.mean()) / (y_tr.mean() + 1e-6)
 
     # Train logging policy (old model with weaker params)
@@ -105,7 +132,7 @@ def task1_counterfactual(X, y_ctr, prices):
     # Simulate logging actions: logging policy bid on items where p_log > threshold
     threshold = np.median(p_log)
     logged_action = (p_log >= threshold).astype(int)  # 1 = bid, 0 = skip
-    target_action = (p_tgt >= threshold).astype(int)
+    (p_tgt >= threshold).astype(int)
 
     # Rewards: clicks observed under logging policy
     rewards = y_te.copy().astype(float)
@@ -130,33 +157,48 @@ def task1_counterfactual(X, y_ctr, prices):
     # ── SNIPS (Self-Normalized IPS) ──
     snips_estimate = np.sum(w_clipped * rewards) / np.sum(w_clipped)
     # Variance via delta method
-    snips_var = np.var(w_clipped * (rewards - snips_estimate)) / (np.sum(w_clipped) ** 2) * len(rewards)
+    snips_var = (
+        np.var(w_clipped * (rewards - snips_estimate))
+        / (np.sum(w_clipped) ** 2)
+        * len(rewards)
+    )
 
     # ── DR (Doubly Robust) ──
     # Direct model estimate (reward prediction)
-    reward_model = train_lgbm(X_tr, y_tr, X_te, y_te,
-                              dict(BASE_PARAMS, n_estimators=100), spw)
+    reward_model = train_lgbm(
+        X_tr, y_tr, X_te, y_te, dict(BASE_PARAMS, n_estimators=100), spw
+    )
     mu_hat = reward_model.predict_proba(X_te)[:, 1]
 
     # DR = E[mu_hat(x)] + E[w * (r - mu_hat(x))]
     dr_direct = np.mean(mu_hat * target_prob + (1 - target_prob) * 0)
     dr_correction = np.mean(w_clipped * (rewards - mu_hat * logged_action))
     dr_estimate = dr_direct + dr_correction
-    dr_var = np.var(mu_hat + w_clipped * (rewards - mu_hat * logged_action)) / len(rewards)
+    dr_var = np.var(mu_hat + w_clipped * (rewards - mu_hat * logged_action)) / len(
+        rewards
+    )
 
     # Confidence intervals (95%)
     z = 1.96
     results = {}
-    for name, est, var in [("IPS", ips_estimate, ips_var),
-                           ("SNIPS", snips_estimate, snips_var),
-                           ("DR", dr_estimate, dr_var)]:
+    for name, est, var in [
+        ("IPS", ips_estimate, ips_var),
+        ("SNIPS", snips_estimate, snips_var),
+        ("DR", dr_estimate, dr_var),
+    ]:
         se = np.sqrt(max(var, 1e-12))
         ci_low = est - z * se
         ci_high = est + z * se
-        results[name] = {"estimate": round(est, 6), "variance": round(var, 8),
-                         "se": round(se, 6), "ci_95": [round(ci_low, 6), round(ci_high, 6)]}
-        logger.info(f"  {name:<8s} Estimate={est:.6f}  Var={var:.8f}  SE={se:.6f}  "
-                    f"95% CI=[{ci_low:.6f}, {ci_high:.6f}]")
+        results[name] = {
+            "estimate": round(est, 6),
+            "variance": round(var, 8),
+            "se": round(se, 6),
+            "ci_95": [round(ci_low, 6), round(ci_high, 6)],
+        }
+        logger.info(
+            f"  {name:<8s} Estimate={est:.6f}  Var={var:.8f}  SE={se:.6f}  "
+            f"95% CI=[{ci_low:.6f}, {ci_high:.6f}]"
+        )
 
     logger.info(f"\n  DR has lowest variance: {dr_var:.8f} vs IPS: {ips_var:.8f}")
     logger.info(f"  Variance reduction: {(1 - dr_var/max(ips_var, 1e-10))*100:.1f}%")
@@ -187,22 +229,26 @@ def task2_multi_objective(X, y_ctr, y_cvr, prices):
     BUDGET = float(prices_te.sum()) * 0.8
 
     # Constraints
-    TARGET_CPA = 200.0     # Max cost per acquisition
-    TARGET_ROI = 0.85      # Min ROI
-    UTIL_FLOOR = 0.80      # Min budget utilization
+    TARGET_CPA = 200.0  # Max cost per acquisition
+    TARGET_ROI = 0.85  # Min ROI
+    UTIL_FLOOR = 0.80  # Min budget utilization
     MIN_WINS = int(len(prices_te) * 0.10)  # Min 10% win rate
 
     # Lagrangian multipliers
-    lambda_cpa = 0.0    # Penalty for CPA violation
-    lambda_roi = 0.0    # Penalty for ROI violation  
-    lambda_util = 0.0   # Penalty for under-utilization
-    lambda_vol = 0.0    # Penalty for low volume
+    lambda_cpa = 0.0  # Penalty for CPA violation
+    lambda_roi = 0.0  # Penalty for ROI violation
+    lambda_util = 0.0  # Penalty for under-utilization
+    lambda_vol = 0.0  # Penalty for low volume
 
     lr = 0.01  # Learning rate for multiplier updates
 
-    logger.info(f"  Constraints: CPA≤{TARGET_CPA}, ROI≥{TARGET_ROI}, Util≥{UTIL_FLOOR}, MinWins≥{MIN_WINS}")
-    logger.info(f"\n  {'Iter':<6} {'λ_CPA':<8} {'λ_ROI':<8} {'λ_Util':<8} {'λ_Vol':<8} "
-                f"{'ROI':<8} {'CPA':<8} {'Util':<8} {'Wins':<8} {'Convs':<6}")
+    logger.info(
+        f"  Constraints: CPA≤{TARGET_CPA}, ROI≥{TARGET_ROI}, Util≥{UTIL_FLOOR}, MinWins≥{MIN_WINS}"
+    )
+    logger.info(
+        f"\n  {'Iter':<6} {'λ_CPA':<8} {'λ_ROI':<8} {'λ_Util':<8} {'λ_Vol':<8} "
+        f"{'ROI':<8} {'CPA':<8} {'Util':<8} {'Wins':<8} {'Convs':<6}"
+    )
 
     trade_off = []
 
@@ -219,23 +265,35 @@ def task2_multi_objective(X, y_ctr, y_cvr, prices):
             if spend + mp <= BUDGET and bid_adj[i] >= mp:
                 spend += mp
                 wins += 1
-                if y_click_te[i]: clicks += 1
-                if y_conv_te[i]: convs += 1
+                if y_click_te[i]:
+                    clicks += 1
+                if y_conv_te[i]:
+                    convs += 1
 
         roi = calc_roi(clicks, convs, spend)
         cpa = spend / max(convs, 1)
         util = spend / BUDGET
-        n_te = len(prices_te)
+        len(prices_te)
 
-        trade_off.append({
-            "iter": iteration, "roi": round(roi, 4), "cpa": round(cpa, 2),
-            "util": round(util, 4), "wins": wins, "convs": convs,
-            "lambda_cpa": round(lambda_cpa, 4), "lambda_roi": round(lambda_roi, 4),
-            "lambda_util": round(lambda_util, 4), "lambda_vol": round(lambda_vol, 4),
-        })
+        trade_off.append(
+            {
+                "iter": iteration,
+                "roi": round(roi, 4),
+                "cpa": round(cpa, 2),
+                "util": round(util, 4),
+                "wins": wins,
+                "convs": convs,
+                "lambda_cpa": round(lambda_cpa, 4),
+                "lambda_roi": round(lambda_roi, 4),
+                "lambda_util": round(lambda_util, 4),
+                "lambda_vol": round(lambda_vol, 4),
+            }
+        )
 
-        logger.info(f"  {iteration:<6} {lambda_cpa:<8.4f} {lambda_roi:<8.4f} {lambda_util:<8.4f} {lambda_vol:<8.4f} "
-                    f"{roi:<8.4f} {cpa:<8.1f} {util:<8.4f} {wins:<8} {convs:<6}")
+        logger.info(
+            f"  {iteration:<6} {lambda_cpa:<8.4f} {lambda_roi:<8.4f} {lambda_util:<8.4f} {lambda_vol:<8.4f} "
+            f"{roi:<8.4f} {cpa:<8.1f} {util:<8.4f} {wins:<8} {convs:<6}"
+        )
 
         # Update multipliers (sub-gradient ascent)
         lambda_cpa = max(0, lambda_cpa + lr * (cpa - TARGET_CPA) / TARGET_CPA)
@@ -243,8 +301,10 @@ def task2_multi_objective(X, y_ctr, y_cvr, prices):
         lambda_util = max(0, lambda_util + lr * (UTIL_FLOOR - util))
         lambda_vol = max(0, lambda_vol + lr * (MIN_WINS - wins) / max(MIN_WINS, 1))
 
-    best = max(trade_off, key=lambda x: x['roi'] if x['util'] >= 0.3 else 0)
-    logger.info(f"\n  Best feasible: Iter={best['iter']}, ROI={best['roi']}, CPA={best['cpa']}, Util={best['util']}")
+    best = max(trade_off, key=lambda x: x["roi"] if x["util"] >= 0.3 else 0)
+    logger.info(
+        f"\n  Best feasible: Iter={best['iter']}, ROI={best['roi']}, CPA={best['cpa']}, Util={best['util']}"
+    )
 
     return {"trade_off": trade_off, "best": best}
 
@@ -271,7 +331,9 @@ def task3_online_learning(X, y_ctr, y_cvr, prices):
     prev_model = None
 
     logger.info(f"  Simulating {len(days)} days, {day_size} impressions each")
-    logger.info(f"\n  {'Day':<6} {'Mode':<20} {'AUC':<8} {'ROI':<8} {'WinRate':<10} {'Drift'}")
+    logger.info(
+        f"\n  {'Day':<6} {'Mode':<20} {'AUC':<8} {'ROI':<8} {'WinRate':<10} {'Drift'}"
+    )
 
     for day_idx, (day_start, day_end) in enumerate(days):
         day_label = f"Day {day_idx + 1}"
@@ -320,8 +382,15 @@ def task3_online_learning(X, y_ctr, y_cvr, prices):
             try:
                 warm_params = dict(BASE_PARAMS)
                 warm_params["n_estimators"] = 100  # Fewer trees for incremental
-                model = train_lgbm(X_tr, y_tr, X_val, y_val, warm_params, spw,
-                                   init_model=prev_model.booster_)
+                model = train_lgbm(
+                    X_tr,
+                    y_tr,
+                    X_val,
+                    y_val,
+                    warm_params,
+                    spw,
+                    init_model=prev_model.booster_,
+                )
             except Exception:
                 model = train_lgbm(X_tr, y_tr, X_val, y_val, BASE_PARAMS, spw)
                 mode = "Full Retrain"
@@ -342,25 +411,36 @@ def task3_online_learning(X, y_ctr, y_cvr, prices):
             if ev[i] >= ev_thresh and spend + mp <= BUDGET and ev[i] >= mp:
                 spend += mp
                 wins += 1
-                if y_day_ctr_mod[i]: clicks += 1
-                if y_day_cvr[i]: convs += 1
+                if y_day_ctr_mod[i]:
+                    clicks += 1
+                if y_day_cvr[i]:
+                    convs += 1
         roi = calc_roi(clicks, convs, spend)
         win_rate = wins / max(len(prices_day), 1)
 
-        results.append({
-            "day": day_idx + 1, "mode": mode, "auc": round(auc, 4),
-            "roi": round(roi, 4), "win_rate": round(win_rate, 4),
-            "drift": drift_applied,
-        })
+        results.append(
+            {
+                "day": day_idx + 1,
+                "mode": mode,
+                "auc": round(auc, 4),
+                "roi": round(roi, 4),
+                "win_rate": round(win_rate, 4),
+                "drift": drift_applied,
+            }
+        )
 
-        logger.info(f"  {day_label:<6} {mode:<20} {auc:<8.4f} {roi:<8.4f} {win_rate:<10.4f} {drift_applied}")
+        logger.info(
+            f"  {day_label:<6} {mode:<20} {auc:<8.4f} {roi:<8.4f} {win_rate:<10.4f} {drift_applied}"
+        )
 
     # Recovery check
     if len(results) >= 5:
-        day4_auc = results[3]['auc']
-        day5_auc = results[4]['auc']
+        day4_auc = results[3]["auc"]
+        day5_auc = results[4]["auc"]
         recovery = day5_auc - day4_auc
-        logger.info(f"\n  Drift Recovery: Day4 AUC={day4_auc:.4f} → Day5 AUC={day5_auc:.4f} (Δ={recovery:+.4f})")
+        logger.info(
+            f"\n  Drift Recovery: Day4 AUC={day4_auc:.4f} → Day5 AUC={day5_auc:.4f} (Δ={recovery:+.4f})"
+        )
 
     return results
 
@@ -405,8 +485,10 @@ def task4_competitor_modeling(X, y_ctr, y_cvr, prices):
         if bid >= competitor_bids[i] and naive_spend + prices_te[i] <= BUDGET:
             naive_spend += prices_te[i]
             naive_wins += 1
-            if y_click_te[i]: naive_clicks += 1
-            if y_conv_te[i]: naive_convs += 1
+            if y_click_te[i]:
+                naive_clicks += 1
+            if y_conv_te[i]:
+                naive_convs += 1
 
     naive_roi = calc_roi(naive_clicks, naive_convs, naive_spend)
 
@@ -429,8 +511,10 @@ def task4_competitor_modeling(X, y_ctr, y_cvr, prices):
         if best_bid >= competitor_bids[i] and shaded_spend + prices_te[i] <= BUDGET:
             shaded_spend += prices_te[i]
             shaded_wins += 1
-            if y_click_te[i]: shaded_clicks += 1
-            if y_conv_te[i]: shaded_convs += 1
+            if y_click_te[i]:
+                shaded_clicks += 1
+            if y_conv_te[i]:
+                shaded_convs += 1
 
     shaded_roi = calc_roi(shaded_clicks, shaded_convs, shaded_spend)
 
@@ -445,25 +529,49 @@ def task4_competitor_modeling(X, y_ctr, y_cvr, prices):
         if bid >= comp_bids_shift[i] and dynamic_spend + prices_te[i] <= BUDGET:
             dynamic_spend += prices_te[i]
             dynamic_wins += 1
-            if y_click_te[i]: dynamic_clicks += 1
-            if y_conv_te[i]: dynamic_convs += 1
+            if y_click_te[i]:
+                dynamic_clicks += 1
+            if y_conv_te[i]:
+                dynamic_convs += 1
 
     dynamic_roi = calc_roi(dynamic_clicks, dynamic_convs, dynamic_spend)
 
     n_te = len(prices_te)
-    logger.info(f"\n  {'Strategy':<30s} {'Wins':<8} {'Clicks':<8} {'Convs':<8} {'ROI':<10} {'WinRate'}")
-    logger.info(f"  {'Naive (bid=EV)':<30s} {naive_wins:<8} {naive_clicks:<8} {naive_convs:<8} {naive_roi:<10.4f} {naive_wins/n_te:.4f}")
-    logger.info(f"  {'Win-Prob Shading':<30s} {shaded_wins:<8} {shaded_clicks:<8} {shaded_convs:<8} {shaded_roi:<10.4f} {shaded_wins/n_te:.4f}")
-    logger.info(f"  {'Shading + Comp Shift':<30s} {dynamic_wins:<8} {dynamic_clicks:<8} {dynamic_convs:<8} {dynamic_roi:<10.4f} {dynamic_wins/n_te:.4f}")
+    logger.info(
+        f"\n  {'Strategy':<30s} {'Wins':<8} {'Clicks':<8} {'Convs':<8} {'ROI':<10} {'WinRate'}"
+    )
+    logger.info(
+        f"  {'Naive (bid=EV)':<30s} {naive_wins:<8} {naive_clicks:<8} {naive_convs:<8} {naive_roi:<10.4f} {naive_wins/n_te:.4f}"
+    )
+    logger.info(
+        f"  {'Win-Prob Shading':<30s} {shaded_wins:<8} {shaded_clicks:<8} {shaded_convs:<8} {shaded_roi:<10.4f} {shaded_wins/n_te:.4f}"
+    )
+    logger.info(
+        f"  {'Shading + Comp Shift':<30s} {dynamic_wins:<8} {dynamic_clicks:<8} {dynamic_convs:<8} {dynamic_roi:<10.4f} {dynamic_wins/n_te:.4f}"
+    )
 
     roi_improvement = (shaded_roi - naive_roi) / max(naive_roi, 0.001) * 100
     logger.info(f"\n  Win-Prob Shading ROI Lift vs Naive: {roi_improvement:+.1f}%")
-    logger.info(f"  Competitor distribution: LogNormal(μ={mu_comp:.2f}, σ={sigma_comp})")
+    logger.info(
+        f"  Competitor distribution: LogNormal(μ={mu_comp:.2f}, σ={sigma_comp})"
+    )
 
     return {
-        "naive": {"roi": round(naive_roi, 4), "wins": naive_wins, "win_rate": round(naive_wins/n_te, 4)},
-        "shaded": {"roi": round(shaded_roi, 4), "wins": shaded_wins, "win_rate": round(shaded_wins/n_te, 4)},
-        "dynamic": {"roi": round(dynamic_roi, 4), "wins": dynamic_wins, "win_rate": round(dynamic_wins/n_te, 4)},
+        "naive": {
+            "roi": round(naive_roi, 4),
+            "wins": naive_wins,
+            "win_rate": round(naive_wins / n_te, 4),
+        },
+        "shaded": {
+            "roi": round(shaded_roi, 4),
+            "wins": shaded_wins,
+            "win_rate": round(shaded_wins / n_te, 4),
+        },
+        "dynamic": {
+            "roi": round(dynamic_roi, 4),
+            "wins": dynamic_wins,
+            "win_rate": round(dynamic_wins / n_te, 4),
+        },
         "shading_lift": round(roi_improvement, 1),
     }
 
@@ -507,10 +615,14 @@ def task5_shadow_deployment(X, y_ctr, y_cvr, prices):
     # Tracking
     hourly_data = []
 
-    logger.info(f"  Total Budget: {TOTAL_BUDGET:.0f}, Hourly Target: {hourly_budget:.0f}")
+    logger.info(
+        f"  Total Budget: {TOTAL_BUDGET:.0f}, Hourly Target: {hourly_budget:.0f}"
+    )
     logger.info(f"  Impressions: {n_te}, Per Hour: {impressions_per_hour}")
-    logger.info(f"\n  {'Hour':<6} {'Spend':<10} {'CumSpend':<12} {'CumUtil':<10} {'Wins':<6} "
-                f"{'Clicks':<8} {'ROI':<8} {'PacingAlpha':<12} {'Drift'}")
+    logger.info(
+        f"\n  {'Hour':<6} {'Spend':<10} {'CumSpend':<12} {'CumUtil':<10} {'Wins':<6} "
+        f"{'Clicks':<8} {'ROI':<8} {'PacingAlpha':<12} {'Drift'}"
+    )
 
     total_wins, total_clicks, total_convs = 0, 0, 0
     ev_thresh = np.percentile(ev, 70)
@@ -551,7 +663,9 @@ def task5_shadow_deployment(X, y_ctr, y_cvr, prices):
 
         # PID pacing update
         error = cumulative_target - cumulative_spend
-        pacing_alpha = max(0.3, min(2.0, pacing_alpha + 0.01 * error / max(hourly_budget, 1)))
+        pacing_alpha = max(
+            0.3, min(2.0, pacing_alpha + 0.01 * error / max(hourly_budget, 1))
+        )
 
         # PSI drift check (compare first vs recent predictions)
         drift_alert = ""
@@ -572,22 +686,35 @@ def task5_shadow_deployment(X, y_ctr, y_cvr, prices):
         cum_util = cumulative_spend / TOTAL_BUDGET
         cum_roi = calc_roi(total_clicks, total_convs, cumulative_spend)
 
-        hourly_data.append({
-            "hour": hour, "spend": round(hour_spend, 2), "cum_spend": round(cumulative_spend, 2),
-            "cum_util": round(cum_util, 4), "wins": hour_wins, "clicks": hour_clicks,
-            "roi": round(cum_roi, 4), "pacing_alpha": round(pacing_alpha, 4),
-            "drift": drift_alert,
-        })
+        hourly_data.append(
+            {
+                "hour": hour,
+                "spend": round(hour_spend, 2),
+                "cum_spend": round(cumulative_spend, 2),
+                "cum_util": round(cum_util, 4),
+                "wins": hour_wins,
+                "clicks": hour_clicks,
+                "roi": round(cum_roi, 4),
+                "pacing_alpha": round(pacing_alpha, 4),
+                "drift": drift_alert,
+            }
+        )
 
-        logger.info(f"  H{hour:<5} {hour_spend:<10.0f} {cumulative_spend:<12.0f} {cum_util:<10.4f} "
-                    f"{hour_wins:<6} {hour_clicks:<8} {cum_roi:<8.4f} {pacing_alpha:<12.4f} {drift_alert}")
+        logger.info(
+            f"  H{hour:<5} {hour_spend:<10.0f} {cumulative_spend:<12.0f} {cum_util:<10.4f} "
+            f"{hour_wins:<6} {hour_clicks:<8} {cum_roi:<8.4f} {pacing_alpha:<12.4f} {drift_alert}"
+        )
 
     final_util = cumulative_spend / TOTAL_BUDGET
     final_roi = calc_roi(total_clicks, total_convs, cumulative_spend)
 
     logger.info("\n  24h Summary:")
-    logger.info(f"    Total Spend: {cumulative_spend:.0f} / {TOTAL_BUDGET:.0f} ({final_util:.1%} utilized)")
-    logger.info(f"    Total Wins: {total_wins}, Clicks: {total_clicks}, Convs: {total_convs}")
+    logger.info(
+        f"    Total Spend: {cumulative_spend:.0f} / {TOTAL_BUDGET:.0f} ({final_util:.1%} utilized)"
+    )
+    logger.info(
+        f"    Total Wins: {total_wins}, Clicks: {total_clicks}, Convs: {total_convs}"
+    )
     logger.info(f"    Final ROI: {final_roi:.4f}")
     logger.info(f"    PSI Alerts: {len(psi_alerts)}")
 
@@ -636,7 +763,9 @@ def main():
     logger.info(f"  Best Lagrangian ROI: {mo_results['best']['roi']:.4f}")
     logger.info(f"  Online Learning Days: {len(ol_results)}")
     logger.info(f"  Bid Shading Lift: {comp_results['shading_lift']:+.1f}%")
-    logger.info(f"  Shadow 24h ROI: {shadow_results['final_roi']:.4f}, Util: {shadow_results['final_util']:.1%}")
+    logger.info(
+        f"  Shadow 24h ROI: {shadow_results['final_roi']:.4f}, Util: {shadow_results['final_util']:.1%}"
+    )
 
     return {
         "counterfactual": cf_results,

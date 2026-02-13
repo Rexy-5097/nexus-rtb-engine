@@ -1,12 +1,13 @@
 import threading
 from typing import Dict
 
+
 class BudgetCoordinator:
     """
     Simulates a centralized budget coordinator (like Redis).
     Manages atomic budget allocation across multiple distributed bidder instances.
     """
-    
+
     def __init__(self, total_budget: float):
         self._lock = threading.Lock()
         self.total_budget = total_budget
@@ -23,14 +24,14 @@ class BudgetCoordinator:
         with self._lock:
             if self.remaining_budget <= 0:
                 return 0.0
-            
+
             grant = min(amount, self.remaining_budget)
             self.remaining_budget -= grant
             self.allocated_budget += grant
-            
+
             current = self.instance_allocations.get(instance_id, 0.0)
             self.instance_allocations[instance_id] = current + grant
-            
+
             return grant
 
     def return_unused(self, instance_id: str, amount: float):
@@ -49,5 +50,5 @@ class BudgetCoordinator:
                 "total": self.total_budget,
                 "remaining": self.remaining_budget,
                 "allocated": self.allocated_budget,
-                "percent_spent": 1.0 - (self.remaining_budget / self.total_budget)
+                "percent_spent": 1.0 - (self.remaining_budget / self.total_budget),
             }

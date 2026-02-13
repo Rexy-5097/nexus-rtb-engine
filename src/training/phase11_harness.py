@@ -8,25 +8,33 @@ Phase 11: Real-Time Market & Signal Realism
 4. Delayed Feedback Modeling
 5. Game-Theoretic Competitor Reaction (10-round)
 """
-import sys, os, warnings, logging
+import logging
+import os
+import sys
+import warnings
+
 import numpy as np
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.abspath("."))
 
-from sklearn.metrics import roc_auc_score
-from scipy.sparse import vstack
+from scipy.sparse import vstack  # noqa: E402
+from sklearn.metrics import roc_auc_score  # noqa: E402
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger(__name__)
 
-from src.training.train import load_dataset, build_matrix, FeatureExtractor
-from src.bidding.config import config
+from src.bidding.config import config  # noqa: E402
+from src.training.train import (FeatureExtractor, build_matrix,  # noqa: E402
+                                load_dataset)
 
 try:
     import lightgbm as lgb
 except ImportError:
     lgb = None
+
 
 # ──────────────────── HELPERS ────────────────────
 def prepare_data():
@@ -35,9 +43,9 @@ def prepare_data():
     fe.set_encoding_maps(top_k_maps)
     X_parts, y_ctr_parts, y_cvr_parts = [], [], []
     for start in range(0, len(full_df), 100000):
-        chunk = full_df.iloc[start:start+100000]
-        c = chunk['click'].values.astype(np.int8)
-        v = chunk['conversion'].values.astype(np.int8)
+        chunk = full_df.iloc[start : start + 100000]
+        c = chunk["click"].values.astype(np.int8)
+        v = chunk["conversion"].values.astype(np.int8)
         rows = list(chunk.itertuples(index=False))
         mat = build_matrix(rows, c, v, global_stats, fe, scaler)
         if mat is not None:
@@ -47,29 +55,50 @@ def prepare_data():
     X = vstack(X_parts)
     y_ctr = np.concatenate(y_ctr_parts)
     y_cvr = np.concatenate(y_cvr_parts)
-    prices = full_df['payingprice'].values.astype(float)
+    prices = full_df["payingprice"].values.astype(float)
     return X, y_ctr, y_cvr, prices
 
+
 def auc_safe(y, p):
-    try: return roc_auc_score(y, p)
-    except: return 0.5
+    try:
+        return roc_auc_score(y, p)
+    except:
+        return 0.5
+
 
 BASE_PARAMS = {
-    "n_estimators": 300, "learning_rate": 0.03, "num_leaves": 15,
-    "max_depth": 4, "min_data_in_leaf": 200, "feature_fraction": 0.7,
-    "bagging_fraction": 0.8, "bagging_freq": 5, "lambda_l1": 10.0, "lambda_l2": 10.0,
+    "n_estimators": 300,
+    "learning_rate": 0.03,
+    "num_leaves": 15,
+    "max_depth": 4,
+    "min_data_in_leaf": 200,
+    "feature_fraction": 0.7,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 5,
+    "lambda_l1": 10.0,
+    "lambda_l2": 10.0,
 }
 
+
 def train_lgbm(X_tr, y_tr, X_va, y_va, params, spw=1.0):
-    p = dict(objective='binary', metric='auc', verbose=-1, scale_pos_weight=spw, **params)
+    p = dict(
+        objective="binary", metric="auc", verbose=-1, scale_pos_weight=spw, **params
+    )
     m = lgb.LGBMClassifier(**p)
-    m.fit(X_tr, y_tr, eval_set=[(X_va, y_va)], eval_metric='auc',
-          callbacks=[lgb.early_stopping(30, verbose=False)])
+    m.fit(
+        X_tr,
+        y_tr,
+        eval_set=[(X_va, y_va)],
+        eval_metric="auc",
+        callbacks=[lgb.early_stopping(30, verbose=False)],
+    )
     return m
+
 
 def calc_roi(clicks, convs, spend):
     value = clicks * config.value_click + convs * config.value_conversion
     return value / max(spend, 1)
+
 
 def run_backtest(pCTR, prices, y_click, y_conv, ev_pct=70, budget_frac=0.8):
     ev = pCTR * config.value_click
@@ -83,11 +112,20 @@ def run_backtest(pCTR, prices, y_click, y_conv, ev_pct=70, budget_frac=0.8):
         if spend + mp <= BUDGET and ev[i] >= mp:
             spend += mp
             wins += 1
-            if y_click[i]: clicks += 1
-            if y_conv[i]: convs += 1
-    return {"roi": calc_roi(clicks, convs, spend), "spend": spend, "budget": BUDGET,
-            "wins": wins, "clicks": clicks, "convs": convs,
-            "util": spend / BUDGET, "win_rate": wins / max(len(prices), 1)}
+            if y_click[i]:
+                clicks += 1
+            if y_conv[i]:
+                convs += 1
+    return {
+        "roi": calc_roi(clicks, convs, spend),
+        "spend": spend,
+        "budget": BUDGET,
+        "wins": wins,
+        "clicks": clicks,
+        "convs": convs,
+        "util": spend / BUDGET,
+        "win_rate": wins / max(len(prices), 1),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -115,7 +153,9 @@ def task1_business_metrics(X, y_ctr, y_cvr, prices):
     p_tgt = np.clip(tgt_model.predict_proba(X_te)[:, 1], 0.01, 0.99)
 
     # Reward model
-    rwd_model = train_lgbm(X_tr, y_tr, X_te, y_te, dict(BASE_PARAMS, n_estimators=100), spw)
+    rwd_model = train_lgbm(
+        X_tr, y_tr, X_te, y_te, dict(BASE_PARAMS, n_estimators=100), spw
+    )
     mu_hat = rwd_model.predict_proba(X_te)[:, 1]
 
     threshold = np.median(p_log)
@@ -136,31 +176,44 @@ def task1_business_metrics(X, y_ctr, y_cvr, prices):
 
     # Map to economic units
     n_impressions = len(prices_te)
-    total_value = bt['clicks'] * config.value_click + bt['convs'] * config.value_conversion
+    total_value = (
+        bt["clicks"] * config.value_click + bt["convs"] * config.value_conversion
+    )
 
     rpm_replay = (total_value / n_impressions) * 1000  # Revenue per mille
-    rpm_dr = dr_estimate * config.value_click * 1000    # DR-based RPM
+    rpm_dr = dr_estimate * config.value_click * 1000  # DR-based RPM
 
-    profit_per_1k_spend = ((total_value - bt['spend']) / max(bt['spend'], 1)) * 1000
-    dr_profit_per_1k = ((dr_estimate * config.value_click * n_impressions - bt['spend']) / max(bt['spend'], 1)) * 1000
+    profit_per_1k_spend = ((total_value - bt["spend"]) / max(bt["spend"], 1)) * 1000
+    dr_profit_per_1k = (
+        (dr_estimate * config.value_click * n_impressions - bt["spend"])
+        / max(bt["spend"], 1)
+    ) * 1000
 
     uplift_pct = (rpm_dr - rpm_replay) / max(rpm_replay, 0.01) * 100
 
     logger.info(f"\n  {'Metric':<35s} {'Replay':<15s} {'DR-Based':<15s} {'Unit'}")
     logger.info(f"  {'─'*75}")
-    logger.info(f"  {'RPM (Revenue per 1K imps)':<35s} {rpm_replay:<15.2f} {rpm_dr:<15.2f} $/1000 imps")
-    logger.info(f"  {'Profit per $1000 spend':<35s} {profit_per_1k_spend:<15.2f} {dr_profit_per_1k:<15.2f} $/1000 spend")
+    logger.info(
+        f"  {'RPM (Revenue per 1K imps)':<35s} {rpm_replay:<15.2f} {rpm_dr:<15.2f} $/1000 imps"
+    )
+    logger.info(
+        f"  {'Profit per $1000 spend':<35s} {profit_per_1k_spend:<15.2f} {dr_profit_per_1k:<15.2f} $/1000 spend"
+    )
     logger.info(f"  {'ROI':<35s} {bt['roi']:<15.4f} {'N/A':<15s} ratio")
-    logger.info(f"  {'DR Policy Value':<35s} {'N/A':<15s} {dr_estimate:<15.6f} prob-units")
+    logger.info(
+        f"  {'DR Policy Value':<35s} {'N/A':<15s} {dr_estimate:<15.6f} prob-units"
+    )
     logger.info(f"  {'Economic Uplift':<35s} {uplift_pct:+.1f}%")
     logger.info(f"  {'Impressions':<35s} {n_impressions}")
     logger.info(f"  {'Total Value (Replay)':<35s} {total_value:.0f}")
 
     return {
-        "rpm_replay": round(rpm_replay, 2), "rpm_dr": round(rpm_dr, 2),
+        "rpm_replay": round(rpm_replay, 2),
+        "rpm_dr": round(rpm_dr, 2),
         "profit_per_1k_replay": round(profit_per_1k_spend, 2),
         "profit_per_1k_dr": round(dr_profit_per_1k, 2),
-        "roi_replay": round(bt['roi'], 4), "dr_estimate": round(dr_estimate, 6),
+        "roi_replay": round(bt["roi"], 4),
+        "dr_estimate": round(dr_estimate, 6),
         "uplift_pct": round(uplift_pct, 1),
     }
 
@@ -188,12 +241,14 @@ def task2_pareto(X, y_ctr, y_cvr, prices):
 
     # Sample 50 Lagrangian configs: sweep λ_cpa and λ_util
     configs = []
-    for lc in np.linspace(0, 5, 10):       # λ_cpa
-        for lu in np.linspace(0, 0.5, 5):   # λ_util
+    for lc in np.linspace(0, 5, 10):  # λ_cpa
+        for lu in np.linspace(0, 0.5, 5):  # λ_util
             configs.append((lc, lu))
 
     results = []
-    logger.info(f"\n  {'#':<4} {'λ_CPA':<8} {'λ_Util':<8} {'ROI':<8} {'Util':<8} {'CPA':<10} {'WinRate':<10} {'Profit':<10}")
+    logger.info(
+        f"\n  {'#':<4} {'λ_CPA':<8} {'λ_Util':<8} {'ROI':<8} {'Util':<8} {'CPA':<10} {'WinRate':<10} {'Profit':<10}"
+    )
 
     for idx, (lc, lu) in enumerate(configs):
         bid_adj = ev * (1 + lu) / (1 + lc) if (1 + lc) > 0 else ev
@@ -203,40 +258,59 @@ def task2_pareto(X, y_ctr, y_cvr, prices):
             if spend + mp <= BUDGET and bid_adj[i] >= mp:
                 spend += mp
                 wins += 1
-                if y_click_te[i]: clicks += 1
-                if y_conv_te[i]: convs += 1
+                if y_click_te[i]:
+                    clicks += 1
+                if y_conv_te[i]:
+                    convs += 1
         roi = calc_roi(clicks, convs, spend)
         util = spend / BUDGET
         cpa = spend / max(convs, 1)
         profit = clicks * config.value_click + convs * config.value_conversion - spend
         wr = wins / n_te
 
-        results.append({
-            "idx": idx, "lambda_cpa": round(lc, 2), "lambda_util": round(lu, 2),
-            "roi": round(roi, 4), "util": round(util, 4), "cpa": round(cpa, 1),
-            "win_rate": round(wr, 4), "profit": round(profit, 1), "wins": wins, "convs": convs,
-        })
+        results.append(
+            {
+                "idx": idx,
+                "lambda_cpa": round(lc, 2),
+                "lambda_util": round(lu, 2),
+                "roi": round(roi, 4),
+                "util": round(util, 4),
+                "cpa": round(cpa, 1),
+                "win_rate": round(wr, 4),
+                "profit": round(profit, 1),
+                "wins": wins,
+                "convs": convs,
+            }
+        )
 
         if idx % 10 == 0 or idx == len(configs) - 1:
-            logger.info(f"  {idx:<4} {lc:<8.2f} {lu:<8.2f} {roi:<8.4f} {util:<8.4f} "
-                        f"{cpa:<10.1f} {wr:<10.4f} {profit:<10.1f}")
+            logger.info(
+                f"  {idx:<4} {lc:<8.2f} {lu:<8.2f} {roi:<8.4f} {util:<8.4f} "
+                f"{cpa:<10.1f} {wr:<10.4f} {profit:<10.1f}"
+            )
 
     # Identify Pareto-efficient points (ROI vs Util)
     pareto = []
-    for r in sorted(results, key=lambda x: x['util']):
-        if not pareto or r['roi'] > pareto[-1]['roi']:
+    for r in sorted(results, key=lambda x: x["util"]):
+        if not pareto or r["roi"] > pareto[-1]["roi"]:
             pareto.append(r)
 
     logger.info(f"\n  Pareto-Efficient Frontier ({len(pareto)} points):")
-    logger.info(f"  {'Util':<10} {'ROI':<10} {'CPA':<10} {'WinRate':<10} {'Profit':<10}")
+    logger.info(
+        f"  {'Util':<10} {'ROI':<10} {'CPA':<10} {'WinRate':<10} {'Profit':<10}"
+    )
     for p in pareto:
-        logger.info(f"  {p['util']:<10.4f} {p['roi']:<10.4f} {p['cpa']:<10.1f} "
-                    f"{p['win_rate']:<10.4f} {p['profit']:<10.1f}")
+        logger.info(
+            f"  {p['util']:<10.4f} {p['roi']:<10.4f} {p['cpa']:<10.1f} "
+            f"{p['win_rate']:<10.4f} {p['profit']:<10.1f}"
+        )
 
     # Recommended operating region: highest profit on Pareto
-    best = max(pareto, key=lambda x: x['profit'])
-    logger.info(f"\n  📈 Recommended operating point: Util={best['util']:.1%}, ROI={best['roi']:.4f}, "
-                f"Profit={best['profit']:.0f}")
+    best = max(pareto, key=lambda x: x["profit"])
+    logger.info(
+        f"\n  📈 Recommended operating point: Util={best['util']:.1%}, ROI={best['roi']:.4f}, "
+        f"Profit={best['profit']:.0f}"
+    )
 
     return {"all_points": results, "pareto": pareto, "recommended": best}
 
@@ -262,32 +336,36 @@ def task3_adaptive_gate(X, y_ctr, y_cvr, prices):
     n_te = len(prices_te)
 
     # 48h = replicate test data twice
-    ev_48 = np.tile(ev, 2)[:n_te*2]
-    prices_48 = np.tile(prices_te, 2)[:n_te*2]
-    y_click_48 = np.tile(y_click_te, 2)[:n_te*2]
-    y_conv_48 = np.tile(y_conv_te, 2)[:n_te*2]
+    ev_48 = np.tile(ev, 2)[: n_te * 2]
+    prices_48 = np.tile(prices_te, 2)[: n_te * 2]
+    y_click_48 = np.tile(y_click_te, 2)[: n_te * 2]
+    y_conv_48 = np.tile(y_conv_te, 2)[: n_te * 2]
     total_n = len(ev_48)
 
     HOURS = 48
     imps_per_hour = total_n // HOURS
     BUDGET = float(prices_48.sum()) * 0.8
-    hourly_budget = BUDGET / HOURS
+    BUDGET / HOURS
 
     # PID controller for EV percentile gate
     TARGET_UTIL = 0.80
     TARGET_ROI = 0.85
-    gate_pct = 70.0   # Starting gate percentile
-    Kp_util = 50.0     # Proportional gain (utilization)
-    Kp_roi = 30.0      # Proportional gain (ROI)
-    Ki_util = 5.0       # Integral gain
+    gate_pct = 70.0  # Starting gate percentile
+    Kp_util = 50.0  # Proportional gain (utilization)
+    Kp_roi = 30.0  # Proportional gain (ROI)
+    Ki_util = 5.0  # Integral gain
     integral_err = 0.0
 
     cum_spend, cum_clicks, cum_convs, cum_wins = 0.0, 0, 0, 0
     hourly_results = []
 
-    logger.info(f"  Budget: {BUDGET:.0f}, Target Util: {TARGET_UTIL:.0%}, Target ROI: {TARGET_ROI}")
-    logger.info(f"\n  {'Hour':<6} {'Gate%':<8} {'Spend':<10} {'CumUtil':<10} {'ROI':<8} "
-                f"{'Wins':<6} {'Clicks':<8}")
+    logger.info(
+        f"  Budget: {BUDGET:.0f}, Target Util: {TARGET_UTIL:.0%}, Target ROI: {TARGET_ROI}"
+    )
+    logger.info(
+        f"\n  {'Hour':<6} {'Gate%':<8} {'Spend':<10} {'CumUtil':<10} {'ROI':<8} "
+        f"{'Wins':<6} {'Clicks':<8}"
+    )
 
     for hour in range(HOURS):
         h_start = hour * imps_per_hour
@@ -313,7 +391,7 @@ def task3_adaptive_gate(X, y_ctr, y_cvr, prices):
 
         # Compute error signals
         elapsed_frac = (hour + 1) / HOURS
-        target_spend = BUDGET * TARGET_UTIL * elapsed_frac
+        BUDGET * TARGET_UTIL * elapsed_frac
         actual_util = cum_spend / BUDGET
         expected_util = TARGET_UTIL * elapsed_frac
         util_error = expected_util - actual_util  # Positive = underspending
@@ -326,31 +404,51 @@ def task3_adaptive_gate(X, y_ctr, y_cvr, prices):
         integral_err = np.clip(integral_err, -5, 5)
 
         # If underspending → lower gate; if ROI too low → raise gate
-        gate_adjustment = -Kp_util * util_error + Kp_roi * max(0, -roi_error) + Ki_util * (-integral_err)
+        gate_adjustment = (
+            -Kp_util * util_error
+            + Kp_roi * max(0, -roi_error)
+            + Ki_util * (-integral_err)
+        )
         gate_pct = np.clip(gate_pct + gate_adjustment, 0, 95)
 
-        hourly_results.append({
-            "hour": hour, "gate_pct": round(gate_pct, 1),
-            "spend": round(hour_spend, 0), "cum_util": round(actual_util, 4),
-            "roi": round(current_roi, 4), "wins": hour_wins, "clicks": hour_clicks,
-        })
+        hourly_results.append(
+            {
+                "hour": hour,
+                "gate_pct": round(gate_pct, 1),
+                "spend": round(hour_spend, 0),
+                "cum_util": round(actual_util, 4),
+                "roi": round(current_roi, 4),
+                "wins": hour_wins,
+                "clicks": hour_clicks,
+            }
+        )
 
         if hour % 6 == 0 or hour == HOURS - 1:
-            logger.info(f"  H{hour:<5} {gate_pct:<8.1f} {hour_spend:<10.0f} {actual_util:<10.4f} "
-                        f"{current_roi:<8.4f} {hour_wins:<6} {hour_clicks:<8}")
+            logger.info(
+                f"  H{hour:<5} {gate_pct:<8.1f} {hour_spend:<10.0f} {actual_util:<10.4f} "
+                f"{current_roi:<8.4f} {hour_wins:<6} {hour_clicks:<8}"
+            )
 
     final_util = cum_spend / BUDGET
     final_roi = calc_roi(cum_clicks, cum_convs, cum_spend)
-    logger.info(f"\n  48h Summary: Util={final_util:.1%}, ROI={final_roi:.4f}, "
-                f"Wins={cum_wins}, Clicks={cum_clicks}, Convs={cum_convs}")
-    logger.info(f"  Gate range: {min(h['gate_pct'] for h in hourly_results):.0f}% → "
-                f"{max(h['gate_pct'] for h in hourly_results):.0f}%")
+    logger.info(
+        f"\n  48h Summary: Util={final_util:.1%}, ROI={final_roi:.4f}, "
+        f"Wins={cum_wins}, Clicks={cum_clicks}, Convs={cum_convs}"
+    )
+    logger.info(
+        f"  Gate range: {min(h['gate_pct'] for h in hourly_results):.0f}% → "
+        f"{max(h['gate_pct'] for h in hourly_results):.0f}%"
+    )
 
     return {
-        "hourly": hourly_results, "final_util": round(final_util, 4),
-        "final_roi": round(final_roi, 4), "total_wins": cum_wins,
-        "gate_range": [min(h['gate_pct'] for h in hourly_results),
-                       max(h['gate_pct'] for h in hourly_results)],
+        "hourly": hourly_results,
+        "final_util": round(final_util, 4),
+        "final_roi": round(final_roi, 4),
+        "total_wins": cum_wins,
+        "gate_range": [
+            min(h["gate_pct"] for h in hourly_results),
+            max(h["gate_pct"] for h in hourly_results),
+        ],
     }
 
 
@@ -369,8 +467,8 @@ def task4_delayed_feedback(X, y_ctr, y_cvr, prices):
 
     # Simulate delay distributions
     np.random.seed(42)
-    click_delays = np.random.exponential(30, n_te)          # Mean 30 min
-    conv_delays = np.random.exponential(240, n_te)          # Mean 4 hours (240 min)
+    click_delays = np.random.exponential(30, n_te)  # Mean 30 min
+    conv_delays = np.random.exponential(240, n_te)  # Mean 4 hours (240 min)
     observation_window = 60  # 60-minute observation window
 
     # Observed feedback (within observation window)
@@ -382,7 +480,7 @@ def task4_delayed_feedback(X, y_ctr, y_cvr, prices):
     conv_delayed_mask = conv_delays > observation_window
 
     click_observed[click_delayed_mask & (y_click_te == 1)] = 0  # Missed clicks
-    conv_observed[conv_delayed_mask & (y_conv_te == 1)] = 0     # Missed conversions
+    conv_observed[conv_delayed_mask & (y_conv_te == 1)] = 0  # Missed conversions
 
     # Naive estimator (uses only observed feedback)
     naive_ctr = click_observed.sum() / n_te
@@ -392,13 +490,15 @@ def task4_delayed_feedback(X, y_ctr, y_cvr, prices):
 
     # Delay-aware correction using importance weighting
     # P(observed | event) = P(delay < window) = 1 - exp(-window/mean_delay)
-    p_click_obs = 1 - np.exp(-observation_window / 30)   # ~86.5%
-    p_conv_obs = 1 - np.exp(-observation_window / 240)    # ~22.1%
+    p_click_obs = 1 - np.exp(-observation_window / 30)  # ~86.5%
+    p_conv_obs = 1 - np.exp(-observation_window / 240)  # ~22.1%
 
     corrected_ctr = click_observed.sum() / (n_te * p_click_obs)
     corrected_clicks = click_observed.sum()
     corrected_cvr_denom = corrected_clicks / p_click_obs
-    corrected_cvr = conv_observed[click_observed == 1].sum() / (max(corrected_cvr_denom, 1) * p_conv_obs)
+    corrected_cvr = conv_observed[click_observed == 1].sum() / (
+        max(corrected_cvr_denom, 1) * p_conv_obs
+    )
 
     # Bayesian posterior update
     # Prior: Beta(alpha=1, beta=1) (uninformative)
@@ -415,10 +515,17 @@ def task4_delayed_feedback(X, y_ctr, y_cvr, prices):
     bayesian_corrected_ctr = alpha_corrected / (alpha_corrected + beta_corrected)
 
     # Lag-aware ROI estimator
-    naive_value = click_observed.sum() * config.value_click + conv_observed.sum() * config.value_conversion
-    corrected_value = (click_observed.sum() / p_click_obs) * config.value_click + \
-                      (conv_observed.sum() / p_conv_obs) * config.value_conversion
-    true_value = y_click_te.sum() * config.value_click + y_conv_te.sum() * config.value_conversion
+    naive_value = (
+        click_observed.sum() * config.value_click
+        + conv_observed.sum() * config.value_conversion
+    )
+    corrected_value = (click_observed.sum() / p_click_obs) * config.value_click + (
+        conv_observed.sum() / p_conv_obs
+    ) * config.value_conversion
+    true_value = (
+        y_click_te.sum() * config.value_click
+        + y_conv_te.sum() * config.value_conversion
+    )
     total_spend = prices_te.sum() * 0.3  # Assume 30% win rate spend
 
     naive_roi = naive_value / max(total_spend, 1)
@@ -436,29 +543,45 @@ def task4_delayed_feedback(X, y_ctr, y_cvr, prices):
     logger.info(f"    Conv delay:  Exp(μ=4h),    P(observe)={p_conv_obs:.3f}")
     logger.info(f"    Observation window: {observation_window} min")
 
-    logger.info(f"\n  {'Metric':<30s} {'True':<12s} {'Naive':<12s} {'Corrected':<12s} {'Bias(Naive)':<14s} {'Bias(Corr)'}")
+    logger.info(
+        f"\n  {'Metric':<30s} {'True':<12s} {'Naive':<12s} {'Corrected':<12s} {'Bias(Naive)':<14s} {'Bias(Corr)'}"
+    )
     logger.info(f"  {'─'*85}")
-    logger.info(f"  {'CTR':<30s} {true_ctr:<12.6f} {naive_ctr:<12.6f} {corrected_ctr:<12.6f} "
-                f"{ctr_bias_naive:<+14.1f}% {ctr_bias_corrected:<+.1f}%")
-    logger.info(f"  {'CVR':<30s} {true_cvr:<12.6f} {naive_cvr:<12.6f} {corrected_cvr:<12.6f} "
-                f"{'—':<14s} {'—'}")
-    logger.info(f"  {'ROI':<30s} {true_roi:<12.4f} {naive_roi:<12.4f} {corrected_roi:<12.4f} "
-                f"{roi_bias_naive:<+14.1f}% {roi_bias_corrected:<+.1f}%")
-    logger.info(f"  {'Bayesian CTR':<30s} {'—':<12s} {bayesian_ctr:<12.6f} {bayesian_corrected_ctr:<12.6f}")
+    logger.info(
+        f"  {'CTR':<30s} {true_ctr:<12.6f} {naive_ctr:<12.6f} {corrected_ctr:<12.6f} "
+        f"{ctr_bias_naive:<+14.1f}% {ctr_bias_corrected:<+.1f}%"
+    )
+    logger.info(
+        f"  {'CVR':<30s} {true_cvr:<12.6f} {naive_cvr:<12.6f} {corrected_cvr:<12.6f} "
+        f"{'—':<14s} {'—'}"
+    )
+    logger.info(
+        f"  {'ROI':<30s} {true_roi:<12.4f} {naive_roi:<12.4f} {corrected_roi:<12.4f} "
+        f"{roi_bias_naive:<+14.1f}% {roi_bias_corrected:<+.1f}%"
+    )
+    logger.info(
+        f"  {'Bayesian CTR':<30s} {'—':<12s} {bayesian_ctr:<12.6f} {bayesian_corrected_ctr:<12.6f}"
+    )
 
     n_missed_clicks = int((click_delayed_mask & (y_click_te == 1)).sum())
     n_missed_convs = int((conv_delayed_mask & (y_conv_te == 1)).sum())
-    logger.info(f"\n  Missed clicks: {n_missed_clicks}/{int(y_click_te.sum())} "
-                f"({n_missed_clicks/max(y_click_te.sum(),1)*100:.1f}%)")
-    logger.info(f"  Missed conversions: {n_missed_convs}/{int(y_conv_te.sum())} "
-                f"({n_missed_convs/max(y_conv_te.sum(),1)*100:.1f}%)")
+    logger.info(
+        f"\n  Missed clicks: {n_missed_clicks}/{int(y_click_te.sum())} "
+        f"({n_missed_clicks/max(y_click_te.sum(),1)*100:.1f}%)"
+    )
+    logger.info(
+        f"  Missed conversions: {n_missed_convs}/{int(y_conv_te.sum())} "
+        f"({n_missed_convs/max(y_conv_te.sum(),1)*100:.1f}%)"
+    )
 
     return {
-        "true_ctr": round(true_ctr, 6), "naive_ctr": round(naive_ctr, 6),
+        "true_ctr": round(true_ctr, 6),
+        "naive_ctr": round(naive_ctr, 6),
         "corrected_ctr": round(corrected_ctr, 6),
         "ctr_bias_naive": round(ctr_bias_naive, 1),
         "ctr_bias_corrected": round(ctr_bias_corrected, 1),
-        "true_roi": round(true_roi, 4), "naive_roi": round(naive_roi, 4),
+        "true_roi": round(true_roi, 4),
+        "naive_roi": round(naive_roi, 4),
         "corrected_roi": round(corrected_roi, 4),
         "roi_bias_naive": round(roi_bias_naive, 1),
         "roi_bias_corrected": round(roi_bias_corrected, 1),
@@ -497,8 +620,10 @@ def task5_game_theory(X, y_ctr, y_cvr, prices):
     our_shade = 0.85
 
     rounds = []
-    logger.info(f"\n  {'Round':<7} {'CompMult':<10} {'OurShade':<10} {'OurWins':<10} {'OurROI':<10} "
-                f"{'CompWins':<10} {'CompROI':<10} {'Equilibrium'}")
+    logger.info(
+        f"\n  {'Round':<7} {'CompMult':<10} {'OurShade':<10} {'OurWins':<10} {'OurROI':<10} "
+        f"{'CompWins':<10} {'CompROI':<10} {'Equilibrium'}"
+    )
 
     for rnd in range(10):
         # Generate competitor bids for this round
@@ -520,14 +645,18 @@ def task5_game_theory(X, y_ctr, y_cvr, prices):
                 if our_spend + mp <= BUDGET:
                     our_spend += mp
                     our_wins += 1
-                    if y_click_te[i]: our_clicks += 1
-                    if y_conv_te[i]: our_convs += 1
+                    if y_click_te[i]:
+                        our_clicks += 1
+                    if y_conv_te[i]:
+                        our_convs += 1
             elif comp_bid >= mp:
                 # Competitor wins
                 comp_spend += mp
                 comp_wins += 1
-                if y_click_te[i]: comp_clicks += 1
-                if y_conv_te[i]: comp_convs += 1
+                if y_click_te[i]:
+                    comp_clicks += 1
+                if y_conv_te[i]:
+                    comp_convs += 1
 
         our_roi = calc_roi(our_clicks, our_convs, our_spend)
         comp_roi = calc_roi(comp_clicks, comp_convs, comp_spend)
@@ -543,18 +672,25 @@ def task5_game_theory(X, y_ctr, y_cvr, prices):
         else:
             eq_status = "📉 Competitor leads"
 
-        rounds.append({
-            "round": rnd + 1, "comp_mult": round(comp_multiplier, 3),
-            "our_shade": round(our_shade, 3),
-            "our_wins": our_wins, "our_roi": round(our_roi, 4),
-            "our_wr": round(our_wr, 4),
-            "comp_wins": comp_wins, "comp_roi": round(comp_roi, 4),
-            "comp_wr": round(comp_wr, 4),
-            "eq_status": eq_status,
-        })
+        rounds.append(
+            {
+                "round": rnd + 1,
+                "comp_mult": round(comp_multiplier, 3),
+                "our_shade": round(our_shade, 3),
+                "our_wins": our_wins,
+                "our_roi": round(our_roi, 4),
+                "our_wr": round(our_wr, 4),
+                "comp_wins": comp_wins,
+                "comp_roi": round(comp_roi, 4),
+                "comp_wr": round(comp_wr, 4),
+                "eq_status": eq_status,
+            }
+        )
 
-        logger.info(f"  R{rnd+1:<6} {comp_multiplier:<10.3f} {our_shade:<10.3f} {our_wins:<10} "
-                    f"{our_roi:<10.4f} {comp_wins:<10} {comp_roi:<10.4f} {eq_status}")
+        logger.info(
+            f"  R{rnd+1:<6} {comp_multiplier:<10.3f} {our_shade:<10.3f} {our_wins:<10} "
+            f"{our_roi:<10.4f} {comp_wins:<10} {comp_roi:<10.4f} {eq_status}"
+        )
 
         # ── Competitor adaptation ──
         # If losing too often → increase bids
@@ -576,17 +712,25 @@ def task5_game_theory(X, y_ctr, y_cvr, prices):
     final = rounds[-1]
     logger.info("\n  Final State (Round 10):")
     logger.info(f"    Our WinRate: {final['our_wr']:.1%}, ROI: {final['our_roi']:.4f}")
-    logger.info(f"    Comp WinRate: {final['comp_wr']:.1%}, ROI: {final['comp_roi']:.4f}")
+    logger.info(
+        f"    Comp WinRate: {final['comp_wr']:.1%}, ROI: {final['comp_roi']:.4f}"
+    )
     logger.info(f"    Comp Multiplier: {final['comp_mult']:.3f}× (started at 1.0×)")
     logger.info(f"    Our Shade: {final['our_shade']:.3f} (started at 0.85)")
 
     # ROI stability
-    our_rois = [r['our_roi'] for r in rounds]
+    our_rois = [r["our_roi"] for r in rounds]
     roi_std = np.std(our_rois)
     roi_stable = roi_std < 0.15
-    logger.info(f"    ROI StdDev: {roi_std:.4f} ({'✅ Stable' if roi_stable else '⚠️ Volatile'})")
+    logger.info(
+        f"    ROI StdDev: {roi_std:.4f} ({'✅ Stable' if roi_stable else '⚠️ Volatile'})"
+    )
 
-    return {"rounds": rounds, "roi_stability": round(roi_std, 4), "roi_stable": roi_stable}
+    return {
+        "rounds": rounds,
+        "roi_stability": round(roi_std, 4),
+        "roi_stable": roi_stable,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -610,12 +754,22 @@ def main():
     logger.info("PHASE 11 COMPLETE")
     logger.info("=" * 65)
     logger.info(f"  RPM Replay: ${biz['rpm_replay']:.2f}, DR RPM: ${biz['rpm_dr']:.2f}")
-    logger.info(f"  Pareto points: {len(pareto['pareto'])}, Best profit: {pareto['recommended']['profit']:.0f}")
-    logger.info(f"  48h Gate: Util={gate['final_util']:.1%}, ROI={gate['final_roi']:.4f}")
+    logger.info(
+        f"  Pareto points: {len(pareto['pareto'])}, Best profit: {pareto['recommended']['profit']:.0f}"
+    )
+    logger.info(
+        f"  48h Gate: Util={gate['final_util']:.1%}, ROI={gate['final_roi']:.4f}"
+    )
     logger.info(f"  Delay bias reduction: CTR {biz.get('uplift_pct', 'N/A')}%")
     logger.info(f"  Game equilibrium: ROI stable={game['roi_stable']}")
 
-    return {"business": biz, "pareto": pareto, "gate": gate, "delay": delay, "game": game}
+    return {
+        "business": biz,
+        "pareto": pareto,
+        "gate": gate,
+        "delay": delay,
+        "game": game,
+    }
 
 
 if __name__ == "__main__":
