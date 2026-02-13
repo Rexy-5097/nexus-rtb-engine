@@ -1,7 +1,7 @@
 import math
 import logging
 import time
-from typing import Optional
+
 
 from src.bidding.features import FeatureExtractor
 from src.bidding.model import ModelLoader
@@ -111,7 +111,7 @@ class BiddingEngine:
 
             # 4. Valuation (Expected Value)
             # Use tuned N
-            N = self.model_loader.n_map.get(adv_id, config.model.n_map.get(adv_id, 0))
+
             
             p_conv_imp = p_ctr * p_cvr
             # Value = pCTR * V_click + pCONV * V_conv

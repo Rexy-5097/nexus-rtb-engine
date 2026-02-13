@@ -1,5 +1,5 @@
 import logging
-import hashlib
+
 from typing import List, Tuple
 from src.bidding.schema import BidRequest
 from src.bidding.config import config
