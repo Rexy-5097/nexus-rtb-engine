@@ -1,7 +1,12 @@
+import logging
+import hashlib
 from typing import List, Tuple
 from src.bidding.schema import BidRequest
 from src.bidding.config import config
-from src.utils.hashing import Hasher
+from src.utils.hashing import hash_feature
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 class FeatureExtractor:
     """
@@ -10,7 +15,7 @@ class FeatureExtractor:
     """
 
     @staticmethod
-    def _norm(val: str) -> str:
+    def _norm(val: object) -> str:
         """Normalize input strings to handle 'NaN', 'null', empty strings."""
         if not val:
             return "unknown"
@@ -46,22 +51,29 @@ class FeatureExtractor:
         
         return os_t, br_t
 
-    @classmethod
-    def extract(cls, request: BidRequest) -> List[int]:
+    def extract(self, request: BidRequest) -> List[int]:
         """
         Extract features from a BidRequest and return a list of hashed feature indices.
-        """
-        adv_id = str(request.advertiserId)
-        ua = cls._norm(request.userAgent)
-        region = cls._norm(request.region)
-        city = cls._norm(request.city)
-        domain = cls._norm(request.domain)
-        vis = cls._norm(request.adSlotVisibility)
-        fmt = cls._norm(request.adSlotFormat)
         
-        os_t, br_t = cls._parse_ua(ua)
+        Args:
+            request (BidRequest): The incoming request object.
+            
+        Returns:
+            List[int]: Sparse vector of feature indices.
+        """
+        # Normalize inputs
+        adv_id = str(request.advertiserId)
+        ua = self._norm(request.userAgent)
+        region = self._norm(request.region)
+        city = self._norm(request.city)
+        domain = self._norm(request.domain)
+        vis = self._norm(request.adSlotVisibility)
+        fmt = self._norm(request.adSlotFormat)
+        
+        os_t, br_t = self._parse_ua(ua)
         
         # Consistent feature string format
+        # Note: These keys must match training pipeline exactly
         raw_features = [
             f"ua_os:{os_t}",
             f"ua_browser:{br_t}",
@@ -74,8 +86,10 @@ class FeatureExtractor:
         ]
         
         # Hash features
+        # Using 2^18 = 262144 bucket space
+        hash_space = config.model.hash_space
         hashed_features = [
-            Hasher.adler32_hash(f, config.model.hash_space) 
+            hash_feature(f, hash_space) 
             for f in raw_features
         ]
         

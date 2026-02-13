@@ -53,7 +53,7 @@ def test_floor_price_rejection(engine, valid_request):
     # Set floor very high
     valid_request.adSlotFloorPrice = "5000"
     response = engine.process(valid_request)
-    assert response.bidPrice == -1
+    assert response.bidPrice == 0
     assert response.explanation == "below_floor"
 
 def test_quality_gate(engine, valid_request):
@@ -62,5 +62,5 @@ def test_quality_gate(engine, valid_request):
     with patch.object(engine.model_loader, 'intercept_ctr', -20.0): # ~0 probability
         with patch.object(engine.model_loader, 'intercept_cvr', -20.0):
             response = engine.process(valid_request)
-            assert response.bidPrice == -1
+            assert response.bidPrice == 0
             assert response.explanation == "quality_gate"

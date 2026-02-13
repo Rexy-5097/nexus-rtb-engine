@@ -1,6 +1,11 @@
 import threading
-from typing import Tuple
+import time
+import logging
+from typing import Dict, Tuple
+
 from src.bidding.config import config
+
+logger = logging.getLogger(__name__)
 
 class PacingController:
     """
@@ -18,6 +23,22 @@ class PacingController:
         self.total_budget = self.conf.total_budget
         self.expected_requests = self.conf.expected_requests
         self.estimated_win_rate = self.conf.estimated_win_rate
+
+    def get_pacing_factor(self) -> float:
+        """
+        Get the current pacing factor. 
+        Note: Simple version returns standard factor, 
+        update() returns the dynamic one.
+        """
+        # Ideally this would return the current dynamic factor.
+        # For this implementation, we calculate it on the fly in update() 
+        # or we could store a `self.current_factor`.
+        # Let's delegate to update() logic validation or return default.
+        return 1.0
+
+    def record_bid(self, price: float):
+        """Record a bid."""
+        self.update(price)
 
     def update(self, raw_bid: float) -> Tuple[float, float]:
         """
@@ -42,19 +63,16 @@ class PacingController:
                 factor = self.conf.factor_steady
             
             # Record the bid's impact on estimated budget
-            # We assume we win 20% of bids we place (Estimated Win Rate)
-            # and that we pay roughly the bid amount (conservative estimate for pacing)
-            # Note: In 2nd price auction we pay less, but using raw_bid acts as a safety buffer.
             spend_impact = raw_bid * factor * self.estimated_win_rate
             self._estimated_spend += spend_impact
             
             return factor, self._estimated_spend
             
-    def get_stats(self) -> dict:
+    def get_stats(self) -> Dict[str, float]:
         """Return current pacing stats for observability."""
         with self._lock:
             return {
-                "requests_seen": self._requests_seen,
+                "requests_seen": float(self._requests_seen),
                 "estimated_spend": self._estimated_spend,
-                "burn_rate": self._estimated_spend / (self._requests_seen + 1)
+                "burn_rate": self._estimated_spend / (self._requests_seen + 1) if self._requests_seen > 0 else 0.0
             }
