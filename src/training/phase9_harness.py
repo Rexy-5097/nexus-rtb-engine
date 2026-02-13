@@ -10,8 +10,9 @@ Phase 9: Institutional Validation & Research Packaging
 6. Production Risk Review
 7. Final Engine Report
 """
-import sys, os, warnings, logging, hashlib
+import sys, os, warnings, logging, hashlib, json
 from datetime import datetime
+from collections import deque
 import numpy as np
 
 warnings.filterwarnings("ignore")

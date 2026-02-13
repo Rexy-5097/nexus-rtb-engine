@@ -128,7 +128,7 @@ def run_grid_search():
         best_result = sorted(valid_results, key=lambda x: x['roi'], reverse=True)[0]
     
     logger.info("="*40)
-    logger.info(f"BEST CONFIGURATION FOUND")
+    logger.info("BEST CONFIGURATION FOUND")
     logger.info(f"Params: {best_result['params']}")
     logger.info(f"ROI: {best_result['roi']:.4f}")
     logger.info(f"Util: {best_result['util']:.2%}")

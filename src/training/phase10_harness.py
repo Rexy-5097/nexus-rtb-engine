@@ -585,11 +585,11 @@ def task5_shadow_deployment(X, y_ctr, y_cvr, prices):
     final_util = cumulative_spend / TOTAL_BUDGET
     final_roi = calc_roi(total_clicks, total_convs, cumulative_spend)
 
-    logger.info(f"\n  24h Summary:")
+    logger.info("\n  24h Summary:")
     logger.info(f"    Total Spend: {cumulative_spend:.0f} / {TOTAL_BUDGET:.0f} ({final_util:.1%} utilized)")
     logger.info(f"    Total Wins: {total_wins}, Clicks: {total_clicks}, Convs: {total_convs}")
     logger.info(f"    Final ROI: {final_roi:.4f}")
-    logger.info("    PSI Alerts: {len(psi_alerts)}")
+    logger.info(f"    PSI Alerts: {len(psi_alerts)}")
 
     return {
         "hourly": hourly_data,
