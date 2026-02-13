@@ -1,5 +1,7 @@
 # Nexus-RTB Engine
 
+![CI Status](https://github.com/Rexy-5097/nexus-rtb-engine/actions/workflows/ci.yml/badge.svg)
+
 ## 🚀 Overview
 
 **Nexus-RTB** is a production-grade Real-Time Bidding (RTB) engine capable of processing bid requests in under **5ms**. It features a dual-model (CTR + CVR) inference engine, adaptive budget pacing via PID control, and a scalable, containerized architecture.

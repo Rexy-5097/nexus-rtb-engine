@@ -5,6 +5,7 @@ import numpy as np
 from typing import Dict, Any, Optional
 
 from src.bidding.config import config
+from src.utils.crypto import ModelIntegrity
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,8 @@ class ModelLoader:
     
     def __init__(self, model_path: str):
         self.model_path = model_path
+        self.sig_path = model_path + ".sig"
+        
         self.weights_ctr = None
         self.weights_cvr = None
         self.intercept_ctr = config.model.default_intercept_ctr
@@ -28,29 +31,53 @@ class ModelLoader:
     def load(self):
         """
         Load model weights from disk.
-        WARNING: Uses pickle.load(). Production systems should verify signatures before loading.
+        enforces integrity check via SHA256 checksum.
         """
         if not os.path.exists(self.model_path):
             logger.error(f"Model file not found at {self.model_path}. Using fail-safe defaults.")
+            return
+
+        # --- SECURITY: Signature Verification ---
+        if not ModelIntegrity.verify_signature(self.model_path, self.sig_path):
+            logger.critical("Model signature verification failed! Possible tampering detected. Refusing to load weights.")
             return
 
         try:
             with open(self.model_path, "rb") as f:
                 data = pickle.load(f)
             
-            # Validate structure
+            # --- SECURITY: Schema & Version Validation ---
+            # In a real scenario, we'd check data.get("version") compatible with APP_VERSION
+            
+            # Helper to validate shape
+            def validate_shape(coef, expected_features):
+                if coef is None: return True
+                # Coef shape is (1, HASH_SPACE) or flattened
+                if hasattr(coef, "shape"):
+                    if len(coef.shape) == 1 and coef.shape[0] == expected_features: return True
+                    if len(coef.shape) == 2 and coef.shape[1] == expected_features: return True
+                return False
+
+            HASH_SPACE = config.model.hash_space
+
             if "ctr" in data:
-                self.weights_ctr = data["ctr"]["coef"].flatten()
-                self.intercept_ctr = float(data["ctr"]["intercept"][0])
+                ctr_coef = data["ctr"]["coef"].flatten()
+                if validate_shape(ctr_coef, HASH_SPACE):
+                    self.weights_ctr = ctr_coef
+                    self.intercept_ctr = float(data["ctr"]["intercept"][0])
+                else:
+                    logger.error("CTR model shape mismatch. Ignoring.")
             
             if "cvr" in data:
-                self.weights_cvr = data["cvr"]["coef"].flatten()
-                self.intercept_cvr = float(data["cvr"]["intercept"][0])
-                
+                cvr_coef = data["cvr"]["coef"].flatten()
+                if validate_shape(cvr_coef, HASH_SPACE):
+                    self.weights_cvr = cvr_coef
+                    self.intercept_cvr = float(data["cvr"]["intercept"][0])
+                    
             if "stats" in data:
                 self.stats = data["stats"]
                 
-            logger.info("Model loaded successfully.")
+            logger.info("Model loaded successfully and verified.")
             
         except Exception as e:
             logger.critical(f"Failed to load model: {e}", exc_info=True)

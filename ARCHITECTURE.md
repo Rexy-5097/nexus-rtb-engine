@@ -20,7 +20,13 @@ graph TD
     C -->|5. Pacing| I[PID Controller]
     end
 
-    G -->|Load Weights| J[(model_weights.pkl)]
+    subgraph Observability
+    P[Prometheus] -->|Scrape /metrics| B
+    Gr[Grafana] -->|Query| P
+    end
+
+    G -->|Load Weights & Verify Sig| J[(model_weights.pkl)]
+    J -.-> K[model_weights.pkl.sig]
     C -->|Bid Response| A
 ```
 
@@ -30,14 +36,15 @@ graph TD
 
 - **`engine.py`**: The central coordinator. Orchestrates the flow from request to response.
 - **`features.py`**: Handles feature extraction and the "hashing trick". Converts raw strings (User-Agent, Domain, etc.) into a sparse feature vector ($2^{18}$ dimensions).
-- **`model.py`**: Manages model lifecycle. Loads weights safely and provides fallbacks.
-- **`pacing.py`**: Implements a PID controller to smooth budget spend over time, preventing early exhaustion.
-- **`config.py`**: Centralized configuration for hyperparameters, thresholds, and constraints.
+- **`model.py`**: Manages model lifecycle. **Enforces SHA256 integrity verification** before loading weights.
+- **`pacing.py`**: Implements a PID controller to smooth budget spend over time.
+- **`config.py`**: Centralized configuration.
 
 ### 2. `src/utils` (Shared)
 
-- **`hashing.py`**: Provides consistent hashing implementations (Adler32/SHA256).
-- **`validation.py`**: Input sanitization and safety guards.
+- **`crypto.py`**: Cryptographic utilities for model signature verification.
+- **`hashing.py`**: Consistent hashing implementations.
+- **`validation.py`**: Input sanitization.
 
 ### 3. `src/training` (Pipeline)
 

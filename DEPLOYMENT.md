@@ -97,6 +97,14 @@ uvicorn deploy.app:app --host 0.0.0.0 --port 8000 --workers 4
 
 Integrate with Prometheus/Grafana. The `deploy/app.py` wrapper contains hooks for:
 
-- Request Count
-- Error Rate
-- Latency Histogram
+- Request Count (`rtb_requests_total`)
+- Error Rate (`rtb_errors_total`)
+- Latency Histogram (`rtb_latency_seconds`)
+- Bid Price Distribution (`rtb_bid_price`)
+- Estimated Spend (`rtb_estimated_spend`)
+
+See [MONITORING.md](MONITORING.md) for full setup instructions using Docker Compose.
+
+### Model Integrity
+
+Ensure `model_weights.pkl.sig` is deployed alongside `model_weights.pkl`. The engine will **fail to load** the model if the signature is missing or invalid.
