@@ -1,0 +1,72 @@
+{
+  "model_version": "v1.8.0",
+  "phase": "phase9",
+  "train_date": "2026-02-13T20:44:11.449434",
+  "train_samples": 31993,
+  "test_samples": 13712,
+  "hash_space": 262144,
+  "model_type": "LightGBM",
+  "hyperparameters": {
+    "n_estimators": 300,
+    "learning_rate": 0.03,
+    "num_leaves": 15,
+    "max_depth": 4,
+    "min_data_in_leaf": 200,
+    "feature_fraction": 0.7,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 5,
+    "lambda_l1": 10.0,
+    "lambda_l2": 10.0
+  },
+  "metrics": {
+    "ctr_auc": 0.6796,
+    "ece": 0.0477,
+    "brier": 0.0538,
+    "roi": 0.9975,
+    "win_rate": 0.1587,
+    "budget_utilization": 0.1149
+  },
+  "top_features": [
+    {
+      "rank": 1,
+      "feature": "slot_ctr",
+      "importance": 10,
+      "pct": 28.6
+    },
+    {
+      "rank": 2,
+      "feature": "adv_ctr_7d",
+      "importance": 4,
+      "pct": 11.4
+    },
+    {
+      "rank": 3,
+      "feature": "adv_ctr_1d",
+      "importance": 4,
+      "pct": 11.4
+    },
+    {
+      "rank": 4,
+      "feature": "hash_67732",
+      "importance": 3,
+      "pct": 8.6
+    },
+    {
+      "rank": 5,
+      "feature": "hash_2195",
+      "importance": 3,
+      "pct": 8.6
+    }
+  ],
+  "model_checksum_sha256": "a244b362b0bc09e8",
+  "model_size_mb": 9.33,
+  "drift_alert_threshold": {
+    "psi": 0.2
+  },
+  "governance": {
+    "auto_drift_logging": true,
+    "psi_alert_threshold": 0.2,
+    "retraining_trigger": "PSI > 0.2 OR AUC drop > 0.05",
+    "rollback_strategy": "Load previous versioned model from artifact store"
+  }
+}
