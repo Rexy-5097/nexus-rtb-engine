@@ -54,10 +54,18 @@ venv.bak/
 *.pkl
 *.sig
 *.npz
+*.csv
+*.jsonl
 logs/
 data/
 experiments/
+reports/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Build artifacts
+submission.zip
+submission_build/
+model_backup.pkl

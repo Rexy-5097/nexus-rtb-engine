@@ -35,7 +35,7 @@ def test_feature_extraction_consistency(mock_bid_request):
     f1 = extractor.extract(mock_bid_request)
     f2 = extractor.extract(mock_bid_request)
     assert f1 == f2
-    assert len(f1) == 8  # We define 8 features
+    assert len(f1) == 15  # 8 base + 2 time + 5 cross
 
 def test_user_agent_parsing():
     """Ensure UA parsing handles edge cases."""
@@ -55,5 +55,6 @@ def test_hash_bounds(mock_bid_request):
     """Ensure hashes stay within HASH_SPACE."""
     extractor = FeatureExtractor()
     features = extractor.extract(mock_bid_request)
-    for f in features:
-        assert 0 <= f < config.model.hash_space
+    for h, val in features:
+        assert 0 <= h < config.model.hash_space
+        assert isinstance(val, float)

@@ -1,262 +1,216 @@
-<p align="center">
-  <h1 align="center">⚡ Nexus-RTB Engine</h1>
-  <p align="center">
-    <strong>High-Performance Real-Time Bidding Engine with Economic Safety Guarantees</strong>
-  </p>
-</p>
+<div align="center">
 
-<p align="center">
-  <a href="https://github.com/Rexy-5097/nexus-rtb-engine/actions"><img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="CI Status"></a>
-  <a href="#"><img src="https://img.shields.io/badge/coverage-94%25-brightgreen?style=flat-square" alt="Coverage"></a>
-  <a href="#"><img src="https://img.shields.io/badge/python-3.13-blue?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-grey?style=flat-square" alt="License"></a>
-  <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-hardened-blueviolet?style=flat-square&logo=letsencrypt&logoColor=white" alt="Security"></a>
-  <a href="#"><img src="https://img.shields.io/badge/OpenRTB-2.5-orange?style=flat-square" alt="OpenRTB"></a>
-</p>
+# Nexus-RTB Engine
 
----
+**Production-grade real-time bidding engine with causal evaluation, multi-objective optimization, and market-adaptive bid shading.**
 
-**Nexus-RTB** is a production-grade Real-Time Bidding engine designed for microsecond-latency ad auctions. It implements advanced economic safety mechanisms — including Expected Value (EV) bidding, PID-based pacing control, atomic budget reservation, and hard budget enforcement — making it suitable for distributed production environments.
+![Version](https://img.shields.io/badge/version-v3.0.0-blue?style=flat-square)
+![Python](https://img.shields.io/badge/python-3.9%2B-green?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square)
+![CI](https://img.shields.io/github/actions/workflow/status/Rexy-5097/nexus-rtb-engine/ci.yml?style=flat-square&label=CI)
+![Latency](https://img.shields.io/badge/P99_latency-0.15ms-blueviolet?style=flat-square)
+![Model](https://img.shields.io/badge/model-LightGBM-orange?style=flat-square)
 
-> **Production Note**: This repository represents a reference implementation of a sidecar bidding agent compatible with OpenRTB 2.5 standards.
+</div>
 
 ---
 
-## 🏗 System Architecture
+## System Overview
 
-The engine follows a **Clean Architecture** pattern, strictly separating I/O (FastAPI) from core bidding logic. It is designed to run as a stateless container (Kubernetes Pod) with a sidecar architecture.
+Nexus-RTB is a multi-model bidding engine for programmatic advertising auctions. It predicts click-through rate (CTR), conversion rate (CVR), and market clearing price to compute expected value and place optimal bids in real-time.
+
+The engine operates in second-price auction environments with sub-5ms latency requirements, handling feature extraction, model inference, economic valuation, risk controls, and budget management in a single request path.
+
+---
+
+## Architecture
 
 ```mermaid
 graph TD
-    User([ SSP / Ad Exchange ]) -->|OpenRTB Request| API[FastAPI Gateway]
-
-    subgraph "Core Engine — Stateless"
-        API -->|Validate| Schema[Pydantic Schema]
-        Schema -->|Extract| Feat[Feature Hashing — Murmur3/Adler32]
-        Feat -->|Infer| Model[Logistic Regression — Sparse]
-
-        Model -->|pCTR / pCVR| Valuation{Valuation Logic}
-        Valuation -->|EV Calculation| Pacer[PID Pacing Controller]
-
-        Pacer -.-|Feedback Loop| Budget[Budget State — Thread-Safe]
+    subgraph Data
+        A[Bid Request] --> B[Feature Extractor]
+        B --> C[Sparse Vector · 262K dims]
     end
 
-    Pacer -->|Bid Price| API
-    API -->|Bid Response| User
+    subgraph Models
+        C --> D[CTR Model]
+        C --> E[CVR Model]
+        C --> F[Price Model]
+        D --> G[Isotonic Calibration]
+        E --> H[Isotonic Calibration]
+    end
+
+    subgraph Economics
+        G --> I["EV = pCTR × V_click + pCTR × pCVR × V_conv"]
+        H --> I
+        F --> J[Market Price Estimate]
+        I --> K[Lagrangian Bid Optimizer]
+        J --> K
+    end
+
+    subgraph Risk Controls
+        K --> L[Adaptive EV Gate]
+        L --> M[Win-Prob Bid Shader]
+        M --> N[Dynamic Bid Multiplier]
+        N --> O[PID Pacing Controller]
+        O --> P[Profit-Aware Cap]
+        P --> Q[Budget Circuit Breaker]
+    end
+
+    Q --> R[BidResponse]
 ```
 
----
-
-## 💰 Economic Safety & Bidding Logic
-
-Nexus-RTB prioritizes **financial safety** and **economic rationality** over raw volume.
-
-### 1. Expected Value (EV) Bidding
-
-We use a dual-prediction model to estimate the unified value of an impression:
-
-$$
-Bid = \alpha \cdot (pCTR \cdot V_{click} + pCVR \cdot V_{conv})
-$$
-
-Where:
-
-- $pCTR$: Probability of Click (Logistic Regression)
-- $pCVR$: Probability of Conversion conditional on Click
-- $\alpha$: Dynamic pacing factor (Bid Shading) controlled by the PID loop
-- $V_{click} / V_{conv}$: Configured base values
-
-### 2. PID Pacing Controller
-
-To prevent budget exhaustion and dampen market shocks, we use a closed-loop **PID Controller**:
-
-- **Proportional (P)**: Reacts to immediate spend velocity divergence.
-- **Integral (I)**: Corrects long-term under/over-delivery.
-- **Derivative (D)**: Dampens sudden spikes in market price (e.g., 2x shock).
-
-### 3. Hard Budget Enforcement
-
-The engine implements **atomic budget reservation** to guarantee financial compliance:
-
-| Cap Type             | Limit        | Enforcement                              |
-| -------------------- | ------------ | ---------------------------------------- |
-| **Global Hard Cap**  | \$25,000,000 | `reserve_budget()` — atomic check+deduct |
-| **Daily Hard Cap**   | \$25,000,000 | `reserve_budget()` — blocks if exceeded  |
-| **Hourly Soft Cap**  | \$2,000,000  | PID shading — traffic smoothing only     |
-| **Surge Protection** | \$50,000/min | PID shading — dampens bots/DDoS          |
-
-> **Key Invariant**: `is_exhausted()` returns `True` when `remaining_budget <= 0`. The engine **never** bids after hard exhaustion. Soft caps influence bid magnitude but cannot block a financially valid reservation.
+**Request path**: Parse → Extract 35 features → 3 model inferences → EV computation → 6 risk control layers → Bid response. Total latency: **0.15ms P99**.
 
 ---
 
-## 🛡 Economic Safety Guarantees
+## Model Description
 
-| Guarantee                 | Mechanism                                       | Status      |
-| ------------------------- | ----------------------------------------------- | ----------- |
-| **Zero Overspend**        | Atomic `reserve_budget()` with `threading.Lock` | ✅ Verified |
-| **Fail-Closed Model**     | `model_loaded` flag; `bid=0` on load failure    | ✅ Verified |
-| **Bid Shading**           | `min(1.0, target_win_rate / observed)`          | ✅ Active   |
-| **ROI Guard**             | Reject bid if `custom_score * avg_mp < EV`      | ✅ Active   |
-| **Thread Safety**         | All financial state behind `threading.Lock`     | ✅ Verified |
-| **Post-Exhaustion Block** | `is_exhausted()` check at top of `process()`    | ✅ Verified |
+| Component     | Type                | Configuration                   |
+| ------------- | ------------------- | ------------------------------- |
+| CTR Model     | LightGBM            | 300 trees, depth 4, 15 leaves   |
+| CVR Model     | LightGBM            | Trained on click-only subset    |
+| Price Model   | LightGBM            | Regression on clearing price    |
+| Calibration   | Isotonic Regression | Per-model, fitted on validation |
+| Feature Space | Hashing Trick       | MurmurHash3, 262K dimensions    |
+| Encoding      | Hybrid Top-K + Tail | Top-3 kept, rest collapsed      |
 
----
-
-## 🔒 Security & Reliability
-
-| Feature             | Implementation                          | Benefit                                  |
-| ------------------- | --------------------------------------- | ---------------------------------------- |
-| **Fail-Closed**     | `try-except` returns `bidPrice=0`       | Prevents zombie bidding on error         |
-| **Model Integrity** | `SHA256` signature verification         | Prevents tampered model artifacts        |
-| **Safe Loading**    | `numpy.load(allow_pickle=False)`        | Mitigates RCE via pickle deserialization |
-| **ROI Guard**       | `if predicted_CPA > max_cpa: bid=0`     | Blocks low-quality inventory             |
-| **SQL Injection**   | Parameterized queries + table allowlist | Prevents injection in training pipeline  |
+**Regularization**: L1=10, L2=10, feature_fraction=0.7, bagging=0.8.
 
 ---
 
-## 🚀 Performance Benchmarks
+## Economic Strategy
 
-Benchmarks run on `c5.2xlarge` (8 vCPU, 16GB RAM):
+```
+EV = pCTR × V_click + (pCTR × pCVR) × V_conversion
+bid = EV × pacing_alpha × bid_multiplier
+final_bid = min(bid, 1.5 × predicted_market_price)
+```
 
-| Metric          | Result     | Target       | Status |
-| --------------- | ---------- | ------------ | ------ |
-| **Avg Latency** | 1.2 ms     | < 5 ms       | ✅     |
-| **P99 Latency** | 3.8 ms     | < 10 ms      | ✅     |
-| **Throughput**  | 12,000 QPS | > 10,000 QPS | ✅     |
-| **Memory**      | 140 MB     | < 512 MB     | ✅     |
+**Key mechanisms**:
 
-### Concurrency Stress Test
-
-| Test                | Threads | Budget  | Reservations       | Overspend  |
-| ------------------- | ------- | ------- | ------------------ | ---------- |
-| Atomic reservation  | 32      | \$1,000 | 10 of 32 succeeded | **\$0.00** |
-| Hard exhaustion     | 1       | \$100   | 1 (then blocked)   | **\$0.00** |
-| Post-exhaustion bid | 1       | \$0     | Engine returns 0   | ✅         |
+- **Adaptive EV Gate**: PID-controlled percentile threshold adjusts dynamically to meet utilization targets (0%–71% range, achieves 80% utilization)
+- **Lagrangian Optimization**: Multi-objective bidding with CPA ceiling, ROI floor, utilization floor, and volume constraints
+- **Dynamic Bid Multiplier**: Rolling 1000-impression ROI tracking, bounds [0.5, 2.0]
+- **Win-Probability Shading**: Optimal shade factor maximizing expected surplus under log-normal competitor distribution
+- **Delayed Feedback Correction**: Importance-weighted estimation reduces ROI bias from −41% to +2.3%
 
 ---
 
-## 📡 API Reference
+## Causal Evaluation
 
-### Health Check
+Off-policy evaluation using three counterfactual estimators:
+
+| Estimator | Estimate   | Variance    | 95% CI         |
+| --------- | ---------- | ----------- | -------------- |
+| IPS       | 0.0242     | 1.10e-6     | [0.022, 0.026] |
+| SNIPS     | 0.0280     | 1.49e-6     | [0.026, 0.030] |
+| **DR**    | **0.0400** | **1.10e-6** | [0.038, 0.042] |
+
+Doubly Robust (DR) estimator provides lowest variance with propensity clipping [0.1, 10.0].
+
+---
+
+## Risk Controls
+
+| Control            | Mechanism                      | Threshold            |
+| ------------------ | ------------------------------ | -------------------- |
+| Profit-Aware Cap   | `bid ≤ 1.5 × predicted_price`  | Prevents overbidding |
+| Adaptive EV Gate   | PID-controlled percentile      | Dynamic 0%–95%       |
+| Dynamic Multiplier | Marginal ROI tracking          | [0.5, 2.0] bounds    |
+| Budget Guard       | Hard exhaustion check          | 100% limit           |
+| Drift Detection    | PSI monitoring                 | Alert at PSI > 0.2   |
+| CVR Confidence     | Variance penalty for low-count | count < 100          |
+| Pacing PID         | Velocity-based throttle        | Within 10% target    |
+| Delay Correction   | Importance-weighted feedback   | Exp(30min)/Exp(4h)   |
+
+---
+
+## Deployment
+
+### Quick Start
 
 ```bash
-curl -s http://localhost:8000/health
-```
-
-```json
-{ "status": "healthy", "service": "nexus-rtb" }
-```
-
-### Submit Bid Request
-
-```bash
-curl -X POST http://localhost:8000/bid \
-  -H "Content-Type: application/json" \
-  -d '{
-    "bidId": "12345",
-    "timestamp": "1418818930",
-    "visitorId": "abc123",
-    "userAgent": "Mozilla/5.0",
-    "ipAddress": "192.168.1.1",
-    "region": "1",
-    "city": "10",
-    "adExchange": "1",
-    "domain": "example.com",
-    "url": "https://example.com/page",
-    "anonymousURLID": "anon1",
-    "adSlotID": "slot1",
-    "adSlotWidth": "300",
-    "adSlotHeight": "250",
-    "adSlotVisibility": "1",
-    "adSlotFormat": "1",
-    "adSlotFloorPrice": "50",
-    "creativeID": "creative1",
-    "advertiserId": "123",
-    "userTags": "sports,tech"
-  }'
-```
-
-```json
-{
-  "bidId": "12345",
-  "bidPrice": 127,
-  "advertiserId": "123",
-  "explanation": "ok_lat=1.234ms"
-}
-```
-
-### Prometheus Metrics
-
-```bash
-curl -s http://localhost:8000/metrics
-```
-
-### OpenAPI Documentation
-
-Interactive Swagger UI available at: `http://localhost:8000/docs`
-
----
-
-## 🛠 Deployment
-
-### Local Development
-
-```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Run tests
-pytest tests/ -v
-
-# Start service
-uvicorn deploy.app:app --host 0.0.0.0 --port 8000
+PYTHONPATH=. python src/training/train.py
+PYTHONPATH=. pytest tests/ -v
 ```
 
-### Docker Production
+### Docker
 
 ```bash
-docker build -t nexus-rtb:v2.0.0 .
-docker run -p 8000:8000 --env-file .env.prod nexus-rtb:v2.0.0
+docker-compose up -d
+# Engine: localhost:8000
+# Prometheus: localhost:9090
+# Grafana: localhost:3000
 ```
 
----
+### Production Rollout
 
-## 📦 Versioning Strategy
-
-We follow [Semantic Versioning 2.0.0](https://semver.org/):
-
-- **Major (v2.0.0)**: New Bidding Logic (EV), Safety Overhaul, Breaking Config Changes.
-- **Minor (v1.1.0)**: New Features (e.g., new model features), Backward Compatible.
-- **Patch (v1.0.1)**: Bug Fixes, Doc Updates.
-
----
-
-## ⚠️ Risk Mitigation
-
-| Risk             | Mitigation                                                                          |
-| ---------------- | ----------------------------------------------------------------------------------- |
-| **Cold Start**   | PID starts with conservative $\alpha = 0.1$, ramps up gradually                     |
-| **Market Shock** | Derivative (D) term aggressively reduces bids on 2x price spikes                    |
-| **Model Drift**  | Offline calibration monitoring (see [CALIBRATION_REPORT.md](CALIBRATION_REPORT.md)) |
-| **Budget Drain** | `is_exhausted()` hard stop + atomic `reserve_budget()`                              |
+| Phase  | Duration | Traffic                       |
+| ------ | -------- | ----------------------------- |
+| Shadow | Week 1-2 | 0% (log only)                 |
+| Canary | Week 3-4 | 1%                            |
+| Ramp   | Week 5-8 | 10% → 25% → 50% → 100%        |
+| Steady | Ongoing  | Weekly retrain, monthly audit |
 
 ---
 
-## 📚 Documentation
+## Benchmarks
 
-| Document                                       | Purpose                                 |
-| ---------------------------------------------- | --------------------------------------- |
-| [ARCHITECTURE.md](ARCHITECTURE.md)             | System design, data flow, failure modes |
-| [SECURITY.md](SECURITY.md)                     | Threat model and mitigation strategies  |
-| [MODEL_CARD.md](MODEL_CARD.md)                 | Model details, features, calibration    |
-| [CONTRIBUTING.md](CONTRIBUTING.md)             | Development standards and PR process    |
-| [CHANGELOG.md](CHANGELOG.md)                   | Release history                         |
-| [DEPLOYMENT.md](DEPLOYMENT.md)                 | Production deployment guide             |
-| [DISTRIBUTED_DESIGN.md](DISTRIBUTED_DESIGN.md) | Multi-node architecture                 |
-| [MONITORING.md](MONITORING.md)                 | Observability and alerting              |
+| Metric                      | Value      | Target  |
+| --------------------------- | ---------- | ------- |
+| CTR AUC                     | 0.680      | ≥ 0.62  |
+| CVR AUC                     | 0.591      | ≥ 0.58  |
+| Train-Test Gap              | 0.015      | < 0.03  |
+| ROI (Static)                | 1.49       | ≥ 0.85  |
+| ROI (24h Shadow)            | 1.29       | ≥ 0.85  |
+| ROI (Game Equilibrium)      | 0.845      | ≥ 0.85  |
+| Latency P99                 | 0.15ms     | < 5ms   |
+| Model Size                  | 9.33 MB    | < 50 MB |
+| Utilization (Adaptive, 48h) | 79.7%      | ≥ 80%   |
+| Drift Recovery              | +0.083 AUC | > 0     |
+| Competitor Stability (σ)    | 0.015      | < 0.15  |
+| Delay Bias (Corrected)      | +2.3%      | < 5%    |
+
+---
+
+## Roadmap
+
+| Quarter | Milestone                                                   |
+| ------- | ----------------------------------------------------------- |
+| **Q1**  | Production deployment at 100% traffic                       |
+| **Q2**  | Adaptive gate + delay correction + real competitor modeling |
+| **Q3**  | Multi-exchange support, feature store, A/B framework        |
+| **Q4**  | Neural bidding models, contextual bandits, full automation  |
+
+---
+
+## Repository Structure
+
+```
+nexus-rtb-engine/
+├── src/
+│   ├── bidding/          # Core engine: features, model, pacing, config
+│   ├── training/         # Training pipeline, backtests, phase harnesses
+│   ├── evaluation/       # Calibration, metrics, hyperopt
+│   ├── simulation/       # Replay, stress testing
+│   ├── monitoring/       # Drift detection
+│   └── utils/            # Hashing utilities
+├── tests/                # Unit tests
+├── scripts/              # Model signing, upgrade utilities
+├── benchmarks/           # Latency benchmarks
+├── monitoring/           # Prometheus + Grafana configs
+├── docs/                 # Architecture, API, model card
+├── .github/workflows/    # CI pipeline
+├── Dockerfile
+├── docker-compose.yml
+├── pyproject.toml
+└── FINAL_ENGINE_REPORT_V3.md
+```
 
 ---
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE).

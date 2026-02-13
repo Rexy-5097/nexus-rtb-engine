@@ -50,7 +50,7 @@ class ModelConfig:
         "3476": 10, # Tire
     })
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class EngineConfig:
     """Master configuration for the Bidding Engine."""
     # Bidding Limits
@@ -66,21 +66,34 @@ class EngineConfig:
     alpha_min: float = 0.1
     alpha_max: float = 2.0
     
-    # Target Win Rate (20-40%)
-    target_win_rate: float = 0.30
+    # Target Win Rate (18%)
+    target_win_rate: float = 0.18
+    # Valuation (for ROI calculation)
+    # Increased for Phase 5 Log-Normal Market (Mean Price ~80)
+    value_click: float = 500.0
+    value_conversion: float = 5000.0
     
     # ROI Guards
     max_cpa: float = 150.0 # Do not bid if predicted CPA > this
     
-    # Reject bids if EV < quality_threshold * avg_ev
-    quality_threshold: float = 0.40
+    # Bidding Control
+    # quality_threshold: Optimized via Grid Search (Phase 5)
+    quality_threshold: float = 0.50
     # Cap bid multiplier relative to market price
-    max_market_ratio: float = 3.0
+    max_market_ratio: float = 2.0
+    
+    # Target Win Rate (Optimized)
+    target_win_rate: float = 0.202
     # Input validation
     max_string_length: int = 512
 
     pacing: PacingConfig = field(default_factory=PacingConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
+
+    # Risk Control & Drift
+    psi_threshold: float = 0.2
+    risk_mode: bool = True
+    cvar_alpha: float = 0.05 # Bottom 5% tail risk
 
 # Global singleton config instance
 config = EngineConfig()

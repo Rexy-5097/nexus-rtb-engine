@@ -1,35 +1,23 @@
-#!/usr/bin/env python3
+import hashlib
 import sys
 import os
-import argparse
-import logging
 
-# Add project root to path
-sys.path.append(os.getcwd())
+model_path = "src/model_weights.pkl"
+sig_path = model_path + ".sig"
 
-from src.utils.crypto import ModelIntegrity
+if not os.path.exists(model_path):
+    print(f"Error: {model_path} not found.")
+    sys.exit(1)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("SignModel")
+print(f"Computing hash for {model_path}...")
+sha256_hash = hashlib.sha256()
+with open(model_path, "rb") as f:
+    for byte_block in iter(lambda: f.read(4096), b""):
+        sha256_hash.update(byte_block)
+computed_hash = sha256_hash.hexdigest()
 
-def main():
-    parser = argparse.ArgumentParser(description="Sign a model file (generate SHA256 hash)")
-    parser.add_argument("model_path", help="Path to the model file (.pkl)")
-    args = parser.parse_args()
+print(f"Writing signature to {sig_path}...")
+with open(sig_path, "w") as f:
+    f.write(computed_hash)
     
-    if not os.path.exists(args.model_path):
-        logger.error(f"File not found: {args.model_path}")
-        sys.exit(1)
-        
-    logger.info(f"Computing hash for {args.model_path}...")
-    file_hash = ModelIntegrity.compute_hash(args.model_path)
-    
-    sig_path = args.model_path + ".sig"
-    with open(sig_path, "w") as f:
-        f.write(file_hash)
-        
-    logger.info(f"Signature written to {sig_path}")
-    logger.info(f"Hash: {file_hash}")
-
-if __name__ == "__main__":
-    main()
+print("Done.")

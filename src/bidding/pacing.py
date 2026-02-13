@@ -236,3 +236,10 @@ class PacingController:
                 "requests": float(self._requests_seen),
                 "win_rate": win_rate
             }
+
+    def get_win_rate(self) -> float:
+        """Return the current observed win rate."""
+        with self._lock:
+            if not self._win_history:
+                return 0.0
+            return sum(self._win_history) / len(self._win_history)
