@@ -11,15 +11,14 @@ Single harness that runs all 7 sub-tasks:
 6. Stress & Adversarial Validation
 7. Final Report
 """
-import sys, os, time, pickle, copy, warnings, logging
+import sys, os, time, pickle, warnings, logging
 import numpy as np
-import pandas as pd
 from collections import deque
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.abspath("."))
 
-from sklearn.metrics import roc_auc_score, log_loss, brier_score_loss
+from sklearn.metrics import roc_auc_score, brier_score_loss
 from sklearn.isotonic import IsotonicRegression
 from scipy.sparse import csr_matrix, vstack
 
@@ -27,7 +26,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 # ─── Import project modules ───
-from src.training.train import load_dataset, build_matrix, FeatureExtractor, HASH_SPACE, calc_ece
+from src.training.train import load_dataset, build_matrix, FeatureExtractor, calc_ece
 from src.bidding.config import config
 
 try:
@@ -729,7 +728,6 @@ def main():
     
     # Save model for other tasks
     if ctr_model is not None:
-        import pickle
         with open("src/model_weights.pkl", "wb") as f:
             ctr_calib = IsotonicRegression(out_of_bounds='clip')
             n_train = int(X.shape[0] * 0.7)

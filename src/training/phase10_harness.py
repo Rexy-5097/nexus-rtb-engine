@@ -12,6 +12,7 @@ import sys, os, warnings, logging
 import numpy as np
 from collections import deque
 from scipy.sparse import vstack
+from scipy import stats as sp_stats
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -147,8 +148,8 @@ def task1_counterfactual(X, y_ctr, prices):
     z = 1.96
     results = {}
     for name, est, var in [("IPS", ips_estimate, ips_var),
-                            ("SNIPS", snips_estimate, snips_var),
-                            ("DR", dr_estimate, dr_var)]:
+                           ("SNIPS", snips_estimate, snips_var),
+                           ("DR", dr_estimate, dr_var)]:
         se = np.sqrt(max(var, 1e-12))
         ci_low = est - z * se
         ci_high = est + z * se
@@ -588,7 +589,7 @@ def task5_shadow_deployment(X, y_ctr, y_cvr, prices):
     logger.info(f"    Total Spend: {cumulative_spend:.0f} / {TOTAL_BUDGET:.0f} ({final_util:.1%} utilized)")
     logger.info(f"    Total Wins: {total_wins}, Clicks: {total_clicks}, Convs: {total_convs}")
     logger.info(f"    Final ROI: {final_roi:.4f}")
-    logger.info(f"    PSI Alerts: {len(psi_alerts)}")
+    logger.info("    PSI Alerts: {len(psi_alerts)}")
 
     return {
         "hourly": hourly_data,
