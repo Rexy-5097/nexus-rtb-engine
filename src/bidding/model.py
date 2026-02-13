@@ -1,7 +1,7 @@
 import os
-import pickle
 import logging
 import numpy as np
+import pickle # Kept only for legacy fallback with signature
 from typing import Dict, Any, Optional, Tuple
 
 from src.bidding.config import config
@@ -13,10 +13,9 @@ class ModelLoader:
     """
     Manages the lifecycle, security, and loading of machine learning model artifacts.
     
-    Responsibilities:
-        - Authenticate model artifacts (SHA256 signature).
-        - Validate schema and tensor shapes.
-        - Provide fail-safe fallback values on corruption or missing files.
+    Strategies:
+        1. NumPy (.npz): Preferred. Fast, secure, zero-code-execution risk.
+        2. Pickle (.pkl): Legacy. Requires SHA256 signature.
     """
     
     def __init__(self, model_path: str):
@@ -24,14 +23,14 @@ class ModelLoader:
         Initialize the loader.
 
         Args:
-            model_path (str): Absolute path to the .pkl model file.
+            model_path (str): Absolute path to the model file (.npz or .pkl).
         """
         self.model_path = model_path
-        self.sig_path = f"{model_path}.sig"
         
         # State: Model Parameters (Default: Safe Intercepts)
         self.weights_ctr: Optional[np.ndarray] = None
         self.weights_cvr: Optional[np.ndarray] = None
+        # Start with ULTRA conservative values (Fail-Closed)
         self.intercept_ctr: float = config.model.default_intercept_ctr
         self.intercept_cvr: float = config.model.default_intercept_cvr
         self.stats: Dict[str, Any] = {}
@@ -42,36 +41,67 @@ class ModelLoader:
     def _load_safe(self) -> None:
         """
         Attempt to load the model with strict security and validation checks.
-        Failures result in a logged critical error and fallback to default (safe) parameters.
         """
         if not os.path.exists(self.model_path):
             logger.error(f"Model artifact not found: {self.model_path}. Running in Fail-Safe mode.")
             return
 
-        # 1. Integrity Check
-        if not ModelIntegrity.verify_signature(self.model_path, self.sig_path):
-            logger.critical("SECURITY ALERT: Model signature verification failed. Possible tampering. Refusing to load.")
+        # Strategy 1: NumPy (.npz) - SAFE
+        if self.model_path.endswith(".npz"):
+            self._load_numpy()
+            return
+
+        # Strategy 2: Pickle (.pkl) - RISKY (Requires Signature)
+        if self.model_path.endswith(".pkl"):
+            self._load_pickle_secure()
+            return
+            
+        logger.error(f"Unknown model format: {self.model_path}")
+
+    def _load_numpy(self):
+        """Load from safe .npz format."""
+        try:
+            with np.load(self.model_path, allow_pickle=False) as data:
+                # Validate and assign logic similar to pickle
+                # Expecting arrays: ctr_coef, ctr_intercept, cvr_coef, cvr_intercept
+                
+                # CTR
+                if "ctr_coef" in data and "ctr_intercept" in data:
+                    ctr_coef = data["ctr_coef"]
+                    if self._validate_shape(ctr_coef, config.model.hash_space):
+                        self.weights_ctr = ctr_coef
+                        self.intercept_ctr = float(data["ctr_intercept"])
+                
+                # CVR
+                if "cvr_coef" in data and "cvr_intercept" in data:
+                    cvr_coef = data["cvr_coef"]
+                    if self._validate_shape(cvr_coef, config.model.hash_space):
+                        self.weights_cvr = cvr_coef
+                        self.intercept_cvr = float(data["cvr_intercept"])
+                        
+                logger.info("Model loaded from .npz successfully.")
+        except Exception as e:
+            logger.critical(f"Failed to load .npz model: {e}", exc_info=True)
+            self._reset_defaults()
+
+    def _load_pickle_secure(self):
+        """Load legacy pickle with signature enforcement."""
+        sig_path = f"{self.model_path}.sig"
+        if not ModelIntegrity.verify_signature(self.model_path, sig_path):
+            logger.critical("SECURITY ALERT: Model signature verification failed. Refusing to load.")
             return
 
         try:
             with open(self.model_path, "rb") as f:
                 data = pickle.load(f)
-            
-            # 2. Schema Validation
             self._parse_and_validate(data)
-            logger.info("Model loaded and verified successfully.")
-            
+            logger.info("Legacy model loaded from .pkl (Verified).")
         except Exception as e:
-            logger.critical(f"Fatal error loading model: {e}", exc_info=True)
+            logger.critical(f"Fatal error loading legacy model: {e}", exc_info=True)
             self._reset_defaults()
 
     def _parse_and_validate(self, data: Dict[str, Any]) -> None:
-        """
-        Validate tensor shapes and extract weights.
-        
-        Args:
-            data (dict): The unpickled model dictionary.
-        """
+        """Validate tensor shapes from dict."""
         expected_dim = config.model.hash_space
 
         # CTR Model
@@ -81,9 +111,7 @@ class ModelLoader:
             
             if self._validate_shape(coef, expected_dim):
                 self.weights_ctr = coef.flatten()
-                self.intercept_ctr = float(intercept[0]) if intercept is not None else -4.0
-            else:
-                logger.error("CTR weight shape mismatch.")
+                self.intercept_ctr = float(intercept[0]) if intercept is not None else config.model.default_intercept_ctr
 
         # CVR Model
         if "cvr" in data:
@@ -92,9 +120,7 @@ class ModelLoader:
             
             if self._validate_shape(coef, expected_dim):
                 self.weights_cvr = coef.flatten()
-                self.intercept_cvr = float(intercept[0]) if intercept is not None else -4.0
-            else:
-                logger.error("CVR weight shape mismatch.")
+                self.intercept_cvr = float(intercept[0]) if intercept is not None else config.model.default_intercept_cvr
                 
         # Metadata
         if "stats" in data:
@@ -102,25 +128,11 @@ class ModelLoader:
 
     @staticmethod
     def _validate_shape(coef: Any, expected_dim: int) -> bool:
-        """
-        Verify that the coefficient vector matches the configured hash space.
-        
-        Args:
-            coef (np.ndarray): The weight matrix.
-            expected_dim (int): Required number of features.
-        
-        Returns:
-            bool: True if valid.
-        """
-        if coef is None:
-            return False
-            
+        if coef is None: return False
         try:
-            # Handle sklearn's (1, N) or flattened (N,) shapes
-            if hasattr(coef, "shape"):
-                shape = coef.shape
-                if len(shape) == 1 and shape[0] == expected_dim: return True
-                if len(shape) == 2 and shape[1] == expected_dim: return True
+            shape = coef.shape
+            if len(shape) == 1 and shape[0] == expected_dim: return True
+            if len(shape) == 2 and shape[1] == expected_dim: return True
             return False
         except Exception:
             return False
@@ -133,13 +145,4 @@ class ModelLoader:
         self.intercept_cvr = config.model.default_intercept_cvr
 
     def get_stats(self, advertiser_id: str) -> Dict[str, float]:
-        """
-        Get market statistics for a specific advertiser.
-        
-        Args:
-            advertiser_id (str): The advertiser ID.
-            
-        Returns:
-            Dict: Key metrics like 'avg_mp' (market price).
-        """
-        return self.stats.get(str(advertiser_id), {"avg_mp": 70.0, "avg_ev": 0.001})
+        return self.stats.get(str(advertiser_id), {"avg_mp": 50.0, "avg_ev": 0.001})

@@ -46,29 +46,26 @@ class BiddingEngine:
         Process a single BidRequest and return a BidResponse.
 
         Execution Flow:
-            1. Validate Input
-            2. Extract Features -> Sparse Vector
-            3. Inference -> pCTR, pCVR
-            4. Calculate Expected Value (EV)
-            5. Apply Pacing Factor -> Bid Price
-            6. Construct Response
-
-        Args:
-            request (BidRequest): The incoming bid request.
-
-        Returns:
-            BidResponse: The decision (bid price, advertiser ID, etc.).
+            1. Pacing Circuit Breaker (Budget Check)
+            2. Feature Extraction
+            3. Inference (CTR/CVR)
+            4. Valuation (EV = pCTR * Vc + pCVR * Vconv)
+            5. ROI Guard (CPA check)
+            6. Pacing Alpha application
+            7. Final Constraints (Floor, Max, Min)
         """
         start_time = time.perf_counter()
+        adv_id = str(request.advertiserId)
         
         try:
-            # 1. Feature Extraction
+            # 1. Circuit Breaker (Hard Budget Cap & Surge)
+            if not self.pacing.can_bid():
+                return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="pacing_limited")
+
+            # 2. Feature Extraction
             hashed_features = self.feature_extractor.extract(request)
             
-            # 2. Inference (Logistic Regression)
-            # Dot product: w . x + b
-            # Optimization: We iterate only over non-zero features (Sparse)
-            
+            # 3. Inference
             # CTR
             w_ctr = self.model_loader.intercept_ctr
             if self.model_loader.weights_ctr is not None:
@@ -83,49 +80,38 @@ class BiddingEngine:
                     w_cvr += self.model_loader.weights_cvr[h]
             p_cvr = self._sigmoid(w_cvr)
 
-            # 3. Valuation & Strategy
-            adv_id = str(request.advertiserId)
-            # Fetch advertiser-specific value multiplier (N-map)
-            # Default to 0 if unknown
-            N = config.model.n_map.get(adv_id, 0)
+            # 4. Valuation (Expected Value)
+            # EV = p(Click) * Value_Click + p(Conversion) * Value_Conversion
+            # Note: p(Conversion) usually means p(Conversion|Impression) = pCTR * pCVR
+            p_conv_imp = p_ctr * p_cvr
             
-            # EV = p(Click) * p(Conv|Click) * Value + p(Click) * Value_Click?
-            # Simplified EV model: pCTR * (1 + N * pCVR) ? 
-            # Or standard: p(Conv) * Value_Conv. p(Conv) = pCTR * pCVR.
-            # Let's assume the formula is: Score = pCTR + N * pCTR * pCVR
-            # Or simplified for hackathon: EV = pCTR * pCVR * 1000 (CPM)
+            ev = (p_ctr * config.value_click) + (p_conv_imp * config.value_conversion)
             
-            # Reverting to original logic found in codebase:
-            # ev = p_ctr + (N * p_ctr * p_cvr)
-            ev = p_ctr + (N * p_ctr * p_cvr)
+            # 5. ROI Guard (CPA Check)
+            # Predicted CPA = Bid / p(Conversion). 
+            # If (Cost / Conversion) > Max_CPA, don't bid.
+            # We estimate Cost ~ Bid Price (First Price) or Market Price (Second Price).
+            # Let's be conservative and use EV as proxy for willingness to pay.
+            if p_conv_imp > 0:
+                predicted_cpa = ev / p_conv_imp
+                if predicted_cpa > config.max_cpa:
+                     return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="roi_guard_cpa")
             
-            # 4. Market Awareness
-            stats = self.model_loader.get_stats(adv_id)
-            avg_ev = stats.get("avg_ev", 0.001)
-            avg_mp = stats.get("avg_mp", 50.0)
+            # 6. Pacing & Shadow Bidding
+            # We update pacing with the *intended* spend (EV) to regulate velocity
+            alpha = self.pacing.update(ev)
             
-            # Quality Gate
-            if ev < config.quality_threshold * avg_ev:
-                return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="quality_gate")
+            # Bid Shading / Alpha
+            final_bid_float = ev * alpha
             
-            # Market Anchoring ranges
-            value_ratio = ev / avg_ev if avg_ev > 0 else 1.0
-            if value_ratio > config.max_market_ratio:
-                value_ratio = config.max_market_ratio
-            
-            # Base Bid 
-            raw_bid = avg_mp * value_ratio
-            
-            # 5. Pacing
-            pacing_factor, _ = self.pacing.update(raw_bid)
-            final_bid = int(raw_bid * pacing_factor)
-            
-            # 6. Safety Checks & Constraints
-            floor = 0
+            # 7. Safety Checks & Constraints
+            floor = 0.0
             try:
                 floor = float(request.adSlotFloorPrice)
             except (ValueError, TypeError):
                 pass
+                
+            final_bid = int(final_bid_float)
             
             if final_bid < floor:
                 return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="below_floor")
@@ -141,7 +127,8 @@ class BiddingEngine:
 
         except Exception as e:
             logger.error(f"Error processing bid {request.bidId}: {e}", exc_info=True)
-            return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=str(request.advertiserId), explanation="internal_error")
+            # Fail Closed
+            return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="internal_error")
 
     def _sigmoid(self, x: float) -> float:
         """Stable sigmoid function."""

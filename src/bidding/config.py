@@ -22,8 +22,13 @@ class PacingConfig:
     pacing_k_i: float = 0.01
     pacing_k_d: float = 0.005
     
+    # Circuit Breakers
+    max_daily_spend: int = 25_000_000  # Hard Cap
+    max_hourly_spend: int = 2_000_000  # Soft Cap
+    max_minute_spend: int = 50_000     # Surge Protection
+
     # Feature Flags / Canary
-    strategy_version: str = "v1" # v1=Stable, v2=Experimental
+    strategy_version: str = "v2_ev_safe" # v1=Stable, v2=Experimental
     experiment_traffic: float = 0.1 # 10% traffic to v2
 
 @dataclass(frozen=True)
@@ -31,9 +36,10 @@ class ModelConfig:
     """Configuration for the CTR/CVR prediction models."""
     feature_bits: int = 18
     hash_space: int = 2 ** 18
-    # Default intercepts (fail-safe values ~1.8% probability)
-    default_intercept_ctr: float = -4.0
-    default_intercept_cvr: float = -4.0
+    # Default intercepts (fail-safe values ~0.1% probability)
+    # Lowered from -4.0 to -7.0 for "Fail-Closed" / Conservative start
+    default_intercept_ctr: float = -7.0
+    default_intercept_cvr: float = -7.0
     
     # Advertiser N-values (Conversion importance)
     n_map: Dict[str, int] = field(default_factory=lambda: {
@@ -47,8 +53,25 @@ class ModelConfig:
 @dataclass(frozen=True)
 class EngineConfig:
     """Master configuration for the Bidding Engine."""
+    # Bidding Limits
     max_bid_price: int = 300
-    min_bid_price: int = 0
+    min_bid_price: int = 1
+    
+    # Value Estimation
+    value_click: float = 50.0  # Base value per click
+    value_conversion: float = 500.0 # Base value per conversion
+    
+    # Dynamic Alpha (Bid Shading)
+    alpha_initial: float = 0.8
+    alpha_min: float = 0.1
+    alpha_max: float = 2.0
+    
+    # Target Win Rate (20-40%)
+    target_win_rate: float = 0.30
+    
+    # ROI Guards
+    max_cpa: float = 150.0 # Do not bid if predicted CPA > this
+    
     # Reject bids if EV < quality_threshold * avg_ev
     quality_threshold: float = 0.40
     # Cap bid multiplier relative to market price
