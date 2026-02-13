@@ -7,26 +7,30 @@ import sqlite3
 import zlib
 import pickle
 import io
+import logging
 
 import pandas as pd
 import numpy as np
 from scipy.sparse import csr_matrix
 from sklearn.linear_model import SGDClassifier
 
-HASH_SPACE = 2 ** 18
+# Use new config and hashing utils
+from src.bidding.config import config
+from src.utils.hashing import Hasher
+from src.bidding.features import FeatureExtractor
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+HASH_SPACE = config.model.hash_space
 CHUNK_SIZE = 100_000
 SQLITE_DB = "bid_events.db"
 SQLITE_BATCH = 10_000
 SQLITE_QUERY_BATCH = 900
 LOG_EVERY_ROWS = 500_000
 
-N_MAP = {
-    "1458": 0,
-    "3358": 2,
-    "3386": 0,
-    "3427": 0,
-    "3476": 10,
-}
+N_MAP = config.model.n_map
 
 IMP_USECOLS = [0, 4, 6, 7, 9, 15, 16, 20, 22]
 IMP_COLS = [
@@ -41,7 +45,6 @@ IMP_COLS = [
     "advertiser",
 ]
 
-
 def match_type(name: str):
     if fnmatch.fnmatch(name, "imp.*.txt"):
         return "IMP"
@@ -51,9 +54,9 @@ def match_type(name: str):
         return "CONV"
     return None
 
-
 def discover_items(root: str):
     items = []
+    # Security: Restrict discovery to specific data directory if possible, currently flexible
     for dirpath, _, filenames in os.walk(root):
         for fname in filenames:
             fpath = os.path.join(dirpath, fname)
@@ -63,6 +66,10 @@ def discover_items(root: str):
                         for info in zf.infolist():
                             if info.is_dir():
                                 continue
+                            if info.file_size > 2 * 1024 * 1024 * 1024: # Zip bomb check
+                                logger.warning(f"Skipping oversized entry: {info.filename}")
+                                continue
+                                
                             base = os.path.basename(info.filename)
                             typ = match_type(base)
                             if not typ:
@@ -79,7 +86,7 @@ def discover_items(root: str):
                                 }
                             )
                 except zipfile.BadZipFile:
-                    print(f"SKIP bad zip: {os.path.abspath(fpath)}")
+                    logger.warning(f"SKIP bad zip: {os.path.abspath(fpath)}")
                 continue
             typ = match_type(fname)
             if typ:
@@ -95,40 +102,41 @@ def discover_items(root: str):
                 )
     return items
 
-
 def iter_chunks(item, usecols=None):
-    if item["kind"] == "file":
-        reader = pd.read_csv(
-            item["path"],
-            sep="\t",
-            header=None,
-            chunksize=CHUNK_SIZE,
-            usecols=usecols,
-            dtype=str,
-            on_bad_lines="skip",
-            low_memory=True,
-            na_filter=False,
-        )
-        for chunk in reader:
-            yield chunk
-    else:
-        with zipfile.ZipFile(item["zip_path"]) as zf:
-            with zf.open(item["entry"]) as f:
-                text = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
-                reader = pd.read_csv(
-                    text,
-                    sep="\t",
-                    header=None,
-                    chunksize=CHUNK_SIZE,
-                    usecols=usecols,
-                    dtype=str,
-                    on_bad_lines="skip",
-                    low_memory=True,
-                    na_filter=False,
-                )
-                for chunk in reader:
-                    yield chunk
-
+    try:
+        if item["kind"] == "file":
+            reader = pd.read_csv(
+                item["path"],
+                sep="\t",
+                header=None,
+                chunksize=CHUNK_SIZE,
+                usecols=usecols,
+                dtype=str,
+                on_bad_lines="skip",
+                low_memory=True,
+                na_filter=False,
+            )
+            for chunk in reader:
+                yield chunk
+        else:
+            with zipfile.ZipFile(item["zip_path"]) as zf:
+                with zf.open(item["entry"]) as f:
+                    text = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
+                    reader = pd.read_csv(
+                        text,
+                        sep="\t",
+                        header=None,
+                        chunksize=CHUNK_SIZE,
+                        usecols=usecols,
+                        dtype=str,
+                        on_bad_lines="skip",
+                        low_memory=True,
+                        na_filter=False,
+                    )
+                    for chunk in reader:
+                        yield chunk
+    except Exception as e:
+        logger.error(f"Error reading {item['display']}: {e}")
 
 def init_db(path: str):
     if os.path.exists(path):
@@ -136,15 +144,12 @@ def init_db(path: str):
     conn = sqlite3.connect(path)
     cur = conn.cursor()
     cur.execute("PRAGMA journal_mode=WAL")
-    cur.execute("PRAGMA synchronous=OFF")
+    # Removed synchronous=OFF for safety as per audit
     cur.execute("CREATE TABLE clicks (bidid TEXT PRIMARY KEY)")
     cur.execute("CREATE TABLE convs (bidid TEXT PRIMARY KEY)")
     conn.commit()
-    # SQLite is used as a temporary, disk-backed index for join operations (Map-Side Join optimization).
-    # Since the dataset is too large to fit in memory (14M+ rows), we index rare events (clicks/conversions)
-    # first, then stream the massive impression log and check for existence against this index.
+    logger.info("Initialized temporary SQLite database for event indexing")
     return conn
-
 
 def norm(val):
     if val is None:
@@ -153,7 +158,6 @@ def norm(val):
     if s == "" or s.lower() == "nan":
         return "unknown"
     return s
-
 
 def parse_price(val):
     if val is None:
@@ -166,53 +170,15 @@ def parse_price(val):
         return 0.0
     return price
 
-
-def parse_ua(ua: str):
-    if ua is None:
-        return "unknown", "unknown"
-    if ua == "unknown":
-        return "unknown", "unknown"
-    ua_l = ua.lower()
-    if "windows" in ua_l:
-        os_token = "windows"
-    elif "mac" in ua_l:
-        os_token = "mac"
-    elif "ios" in ua_l:
-        os_token = "ios"
-    elif "android" in ua_l:
-        os_token = "android"
-    elif "linux" in ua_l:
-        os_token = "linux"
-    else:
-        os_token = "other"
-
-    if "edge" in ua_l:
-        br_token = "edge"
-    elif "chrome" in ua_l:
-        br_token = "chrome"
-    elif "firefox" in ua_l:
-        br_token = "firefox"
-    elif "safari" in ua_l:
-        br_token = "safari"
-    elif "msie" in ua_l or "trident" in ua_l or "ie" in ua_l:
-        br_token = "ie"
-    elif "opera" in ua_l:
-        br_token = "opera"
-    else:
-        br_token = "other"
-
-    return os_token, br_token
-
-
-def hash_feature(feature: str):
-    return zlib.adler32(feature.encode("utf-8")) % HASH_SPACE
-
+# hash_feature now redundant, using Hasher directly in build_feature_matrix
+def hash_feature(feature_str: str):
+    return Hasher.adler32_hash(feature_str, HASH_SPACE)
 
 def index_events(conn, items, table_name, label):
     cur = conn.cursor()
     total_rows = 0
     for item in items:
-        print(f"Processing {label} {item['name']}")
+        logger.info(f"Processing {label} {item['name']}")
         file_rows = 0
         for chunk in iter_chunks(item, usecols=[0]):
             if chunk.empty:
@@ -236,10 +202,9 @@ def index_events(conn, items, table_name, label):
                 )
             conn.commit()
             if file_rows % LOG_EVERY_ROWS < len(cleaned):
-                print(f"{label} rows so far: {file_rows}")
-        print(f"Completed {label} {item['name']} rows={file_rows}")
-    print(f"{label} total rows processed: {total_rows}")
-
+                logger.info(f"{label} rows so far: {file_rows}")
+        logger.info(f"Completed {label} {item['name']} rows={file_rows}")
+    logger.info(f"{label} total rows processed: {total_rows}")
 
 def fetch_existing(conn, table_name, bidids):
     found = set()
@@ -249,6 +214,7 @@ def fetch_existing(conn, table_name, bidids):
     for i in range(0, len(bidids), SQLITE_QUERY_BATCH):
         batch = bidids[i : i + SQLITE_QUERY_BATCH]
         placeholders = ",".join("?" for _ in batch)
+        # Safe parameterized query
         cur.execute(
             f"SELECT bidid FROM {table_name} WHERE bidid IN ({placeholders})",
             batch,
@@ -257,7 +223,6 @@ def fetch_existing(conn, table_name, bidids):
             found.add(row[0])
     return found
 
-
 def build_feature_matrix(rows, clicked_mask, conv_mask, stats_map):
     n = len(rows)
     row_indices = []
@@ -265,6 +230,10 @@ def build_feature_matrix(rows, clicked_mask, conv_mask, stats_map):
     data = []
 
     for i, row in enumerate(rows):
+        # Unpack usage of FeatureExtractor logic reused here for consistency
+        # Construct mock Request object or use helper?
+        # For training speed, we inline the logic but use Hasher
+        
         bidid, ua, region, city, domain, vis, fmt, payingprice, advertiser = row
         ua_val = norm(ua).lower()
         region_val = norm(region)
@@ -278,7 +247,7 @@ def build_feature_matrix(rows, clicked_mask, conv_mask, stats_map):
         fmt_val = norm(fmt)
         adv_val = norm(advertiser)
 
-        os_token, br_token = parse_ua(ua_val)
+        os_token, br_token = FeatureExtractor._parse_ua(ua_val)
 
         feats = [
             ("ua_os", os_token),
@@ -290,12 +259,14 @@ def build_feature_matrix(rows, clicked_mask, conv_mask, stats_map):
             ("advertiser", adv_val),
             ("domain", domain_val),
         ]
+        
         for name, value in feats:
             if value == "unknown":
                 continue
             feature = f"{name}:{value}"
             row_indices.append(i)
-            col_indices.append(hash_feature(feature))
+            # Use strict Hasher
+            col_indices.append(Hasher.adler32_hash(feature, HASH_SPACE))
             data.append(1.0)
 
         stats = stats_map.get(adv_val)
@@ -312,10 +283,6 @@ def build_feature_matrix(rows, clicked_mask, conv_mask, stats_map):
 
     if not row_indices:
         return csr_matrix((n, HASH_SPACE), dtype=np.float32)
-    
-    # Construct a Coordinate Format (COO) sparse matrix which is efficient for incremental construction,
-    # then convert to CSR (Compressed Sparse Row) for fast arithmetic operations.
-    # The matrix shape is (batch_size, 2^18), representing the hashed feature space.
     X = csr_matrix(
         (np.array(data, dtype=np.float32), (np.array(row_indices), np.array(col_indices))),
         shape=(n, HASH_SPACE),
@@ -335,7 +302,7 @@ def process_impressions(items, conn):
     total_convs = 0
 
     for item in items:
-        print(f"Processing IMP {item['name']}")
+        logger.info(f"Processing IMP {item['name']}")
         file_rows = 0
         for chunk in iter_chunks(item, usecols=IMP_USECOLS):
             if chunk.empty:
@@ -403,9 +370,9 @@ def process_impressions(items, conn):
 
             file_rows += n_rows
             if file_rows % LOG_EVERY_ROWS < n_rows:
-                print(f"IMP rows so far: {file_rows}")
+                logger.info(f"IMP rows so far: {file_rows}")
 
-        print(f"Completed IMP {item['name']} rows={file_rows}")
+        logger.info(f"Completed IMP {item['name']} rows={file_rows}")
 
     return (
         ctr_model,
@@ -417,7 +384,6 @@ def process_impressions(items, conn):
         total_clicks,
         total_convs,
     )
-
 
 def build_stats(stats_map):
     stats_out = {}
@@ -434,7 +400,6 @@ def build_stats(stats_map):
         }
     return stats_out
 
-
 def model_payload(model, trained):
     if trained and hasattr(model, "coef_"):
         coef = model.coef_
@@ -450,22 +415,21 @@ def model_payload(model, trained):
         "hash_space": HASH_SPACE,
     }
 
-
 def main():
     root = os.getcwd()
     items = discover_items(root)
 
     items_sorted = sorted(items, key=lambda x: (x["type"], x["display"]))
-    print("Discovered files")
+    logger.info(f"Discovered {len(items_sorted)} files")
     for item in items_sorted:
-        print(f"{item['type']}\t{item['display']}\tsize={item['size']}")
+        logger.info(f"{item['type']}\t{item['name']}\tsize={item['size']}")
 
     imps = [i for i in items_sorted if i["type"] == "IMP"]
     clks = [i for i in items_sorted if i["type"] == "CLK"]
     convs = [i for i in items_sorted if i["type"] == "CONV"]
 
     if not imps:
-        print("ERROR no impression files found")
+        logger.error("ERROR no impression files found")
         sys.exit(1)
 
     conn = init_db(SQLITE_DB)
@@ -491,23 +455,22 @@ def main():
         "stats": stats_out,
     }
 
-    with open("model_weights.pkl", "wb") as f:
+    with open("src/model_weights.pkl", "wb") as f:
         pickle.dump(output, f)
 
-    print("Final summary")
-    print(f"Total impressions: {total_imps}")
-    print(f"Total clicks: {total_clicks}")
-    print(f"Total conversions: {total_convs}")
-    print("Advertiser stats")
+    logger.info("Final summary")
+    logger.info(f"Total impressions: {total_imps}")
+    logger.info(f"Total clicks: {total_clicks}")
+    logger.info(f"Total conversions: {total_convs}")
+    logger.info("Advertiser stats")
     for adv in sorted(stats_out.keys()):
         stat = stats_out[adv]
-        print(f"{adv}\tavg_mp={stat['avg_mp']:.6f}\tavg_ev={stat['avg_ev']:.6f}")
+        logger.info(f"{adv}\tavg_mp={stat['avg_mp']:.6f}\tavg_ev={stat['avg_ev']:.6f}")
 
     conn.close()
 
     if os.path.exists(SQLITE_DB):
         os.remove(SQLITE_DB)
-
 
 if __name__ == "__main__":
     main()

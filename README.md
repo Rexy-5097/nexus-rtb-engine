@@ -1,81 +1,98 @@
-# Nexus-RTB: High-Frequency Request-to-Bid Engine
+# Nexus-RTB Engine
 
-**Nexus-RTB** is a production-grade, high-frequency Real-Time Bidding (RTB) engine designed for second-price auctions. It is optimized for extreme low-latency environments (< 5ms per inference) and constrained memory usage, making it suitable for edge deployment or high-throughput DSPs.
+## 🚀 Overview
 
-## 🚀 Key Features
+**Nexus-RTB** is a production-grade Real-Time Bidding (RTB) engine capable of processing bid requests in under **5ms**. It features a dual-model (CTR + CVR) inference engine, adaptive budget pacing via PID control, and a scalable, containerized architecture.
 
-- **Ultra-Low Latency**: Pure Python implementation using hashed feature lookups and lightweight logistic regression, ensuring <5ms response times.
-- **Market Anchoring**: Bidding strategy is anchored to historical market price (2nd price) rather than pure probability, optimizing for win-rate in second-price auctions.
-- **Adaptive Pacing**: Implements a feedback-loop control system (PID-like) to smooth budget consumption throughout the day, preventing early budget exhaustion.
-- **Hybrid Prediction**: Uses dual Logistic Regression models (CTR + CVR) trained with SGD on 14M+ impressions.
-- **Safety Gates**: Built-in dynamic floor price compliance and Minimum Expected Value (EV) gating to reject low-quality inventory.
+![Architecture Diagram](https://mermaid.ink/img/pako:eNqNVMtu2zAQ_BWCy0GAnnooCjRpLtoCbdGiQA89FJaFWEukSpGqRDMG_vfSciwnTdoWvYhYzszO7MzutEapVIFSFY_eWftmPe9-sMYY4y201m8sK1l5Y_kba2_fvdvQx_eXN3R1cXVx_fEiQdJIKaUQnBfC85LzUkhWCsFZKYQQrOSCFYITngvBScFZIQSjeSlEwXnOScEZKwQneMkF5y3mR_A8Z0UpeMFZITjP-C-s4LxkfHqW8UIwXkpeCMZLyW_g2f3d3dPNTV8cZ0_w_eGz-q_2iG-e4cf3t33xCN8__6r-qp_g-_fv-uIJfvzyqf6rZ_j-40dfnMA_X_5U_7UEfx4_9sUj_PDxs_qvHuD779_7og21t6wxtrHW8h-Wv7P23trHvtjD3-o_7W1fPMKPXz7Wf_UM33__1heP8P3nT_VfPcEPXz_3xSP8-PVT_VcKf6v_7IsT-PHrp_qv9vD91299cYK_1X_1xQn8dPuk_quHvtjDX-o_--IEfvr4Wf1XD_3x6wS__v4n_Pz1W_ihb7bgD18_9cX9E3z_9bv6jx7g-_fvffEIf3__rP6rZ_jxx0990R-_y3-v_6N-gh-_fO-Lf8OzvX16uq2z9vG2tvaxztr72tvHOmtva28f66y9rb19rLP2tvb2sc7a29rbxzprb2tvH-usva29fayz9rb29rHO2tva28c6a29rbx_rrL2tvX2ss_a29vaxztrb2tvHOmtva28f66y9rb19rLP2tvb2sc7a29rbxzprb2tvH-usvau9_TckJ87z)
 
-## 📂 Project Structure
+## 🏗 Architecture
 
-```
+The system is built on a modular "Clean Architecture" pattern:
+
+- **`src.bidding`**: Core domain logic (Inference, Valuation, Pacing, Config).
+- **`src.utils`**: Shared utilities (Hashing, Validation).
+- **`src.training`**: Streaming training pipeline.
+
+## ✨ Key Features
+
+- **Performance**: < 5ms P99 Latency.
+- **Intelligence**: Combined CTR + CVR prediction using LR with the Hashing Trick ($2^{18}$ features).
+- **Control**: PID-based pacing controller for smooth budget delivery.
+- **Safety**: Fail-safe defaults, input sanitization, and strict timeouts.
+- **Deployable**: Dockerized with FastAPI and Prometheus-ready hooks.
+
+## 🛠 Project Structure
+
+```bash
 nexus-rtb-engine/
 ├── src/
-│   ├── Bid.py            # Core bidding logic (Inference Engine)
-│   ├── Bidder.py         # Interface definition
-│   ├── BidRequest.py     # Request object model
-│   └── model_weights.pkl # Serialized model weights & stats
-├── training/
-│   ├── train.py          # Streaming training pipeline (SGD)
-│   └── debug_data.py     # Data inspection utilities
-├── requirements.txt      # Dependencies
-└── README.md             # Documentation
+│   ├── bidding/          # Core Engine Logic
+│   │   ├── engine.py     # Orchestrator
+│   │   ├── features.py   # Feature Extraction
+│   │   ├── pacing.py     # PID Controller
+│   │   └── config.py     # Configuration
+│   ├── training/         # ML Pipeline
+│   └── utils/            # Utilities
+├── tests/                # Pytest Suite
+├── benchmarks/           # Performance Scripts
+├── deploy/               # Deployment Configs
+├── docs/                 # Detailed Documentation
+├── ARCHITECTURE.md       # System Design
+├── MODEL_CARD.md         # Model Details
+└── Dockerfile            # Container Definition
 ```
 
-## 🛠️ Installation & Usage
+## 🚀 Getting Started
 
-1.  **Clone the repository:**
+### 1. Prerequisites
 
-    ```bash
-    git clone https://github.com/Rexy-5097/nexus-rtb-engine.git
-    cd nexus-rtb-engine
-    ```
+- Python 3.9+
+- Docker
 
-2.  **Install dependencies:**
+### 2. Run Tests
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+Validate the system logic:
 
-3.  **Training (Optional):**
-    If you have the dataset (IPinYou or compatible), you can retrain the model:
+```bash
+pip install -r requirements.txt
+pytest tests/
+```
 
-    ```bash
-    python training/train.py
-    ```
+### 3. Run Benchmark
 
-    This will generate a new `model_weights.pkl`.
+Verify performance SLA (<5ms):
 
-4.  **Inference:**
-    The `Bid.py` class is designed to be instantiated by a DSP framework.
+```bash
+python benchmarks/latency_benchmark.py
+```
 
-    ```python
-    from src.Bid import Bid
-    from src.BidRequest import BidRequest
+### 4. Build & Run
 
-    bidder = Bid()
-    # ... receive request_data ...
-    price = bidder.getBidPrice(request_data)
-    ```
+Deploy the container locally:
 
-## 🧠 Algorithmic Approach
+```bash
+docker build -t nexus-rtb .
+docker run -p 8000:8000 nexus-rtb
+```
 
-### Feature Engineering
+## 📚 Documentation
 
-High-cardinality categorical features (User-Agent, City, Domain, etc.) are hashed into a fixed-size space ($2^{18}$) using the `hashing trick`. This ensures bounded memory usage (< 512MB) and constant-time lookup.
+- [**System Architecture**](ARCHITECTURE.md)
+- [**Deployment Guide**](DEPLOYMENT.md)
+- [**Model Card**](MODEL_CARD.md)
+- [**Security Audit**](docs/security_audit.md)
+- [**Technical Report**](docs/project_report.md)
 
-### Bidding Logic
+## 🤝 Contributing
 
-The bid price is calculated as:
-$$ Bid = MarketPrice*{avg} \times \min(3.0, \frac{EV}{EV*{avg}}) \times PacingFactor $$
-Where $EV = pCTR + N \times pCTR \times pCVR$.
+This project is structured for high maintainability.
 
-This formula ensures we bid competitively for high-value users while respecting the advertiser's specific conversion goals ($N$).
+1. Fork the repo.
+2. Create a feature branch.
+3. Add tests for new logic.
+4. Submit a Pull Request.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT
