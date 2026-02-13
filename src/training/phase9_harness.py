@@ -10,18 +10,15 @@ Phase 9: Institutional Validation & Research Packaging
 6. Production Risk Review
 7. Final Engine Report
 """
-import sys, os, time, pickle, json, warnings, logging, hashlib
+import sys, os, warnings, logging, hashlib
 from datetime import datetime
-from collections import deque
 import numpy as np
-import pandas as pd
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.abspath("."))
 
 from sklearn.metrics import roc_auc_score, brier_score_loss
-from sklearn.isotonic import IsotonicRegression
-from scipy.sparse import csr_matrix, vstack
+from scipy.sparse import vstack
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -155,8 +152,12 @@ def sim_backtest(pCTR, prices, y_click, y_conv, ev_percentile=70, use_dynamic=Tr
             spend += mp
             wins += 1
             val = 0
-            if y_click[i]: clicks += 1; val += config.value_click
-            if y_conv[i]: convs += 1; val += config.value_conversion
+            if y_click[i]:
+                clicks += 1
+                val += config.value_click
+            if y_conv[i]:
+                convs += 1
+                val += config.value_conversion
             window.append((mp, val))
         else:
             window.append((0, 0))
@@ -361,7 +362,7 @@ def task3_capital_allocation(X, y_ctr, y_cvr, prices):
     for p in ev_pcts:
         logger.info(f"    P{p}: {np.percentile(ev, p):.2f}")
 
-    logger.info(f"  Price Distribution:")
+    logger.info("  Price Distribution:")
     for p in ev_pcts:
         logger.info(f"    P{p}: {np.percentile(prices_te, p):.2f}")
 
@@ -387,7 +388,7 @@ def task3_capital_allocation(X, y_ctr, y_cvr, prices):
     if neg_marginal_pct:
         logger.info(f"  📉 Marginal ROI turns negative at P{neg_marginal_pct}")
     else:
-        logger.info(f"  📈 Marginal ROI stays positive across all thresholds")
+        logger.info("  📈 Marginal ROI stays positive across all thresholds")
 
     return {"peak_pct": peak_pct, "peak_roi": peak_roi, "neg_marginal_pct": neg_marginal_pct}
 
@@ -488,8 +489,8 @@ def task5_experiment_tracking(metadata):
 
     logger.info(f"  Experiment registered: {entry['experiment_id']}")
     logger.info(f"  Registry: {registry_path}")
-    logger.info(f"  Format: JSONL (one JSON per line)")
-    logger.info(f"\n  Sample entry:")
+    logger.info("  Format: JSONL (one JSON per line)")
+    logger.info("\n  Sample entry:")
     logger.info(json.dumps(entry, indent=2))
 
     return entry

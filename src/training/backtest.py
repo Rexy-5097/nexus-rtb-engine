@@ -181,7 +181,7 @@ def run_backtest():
     conv_lift = ((total_convs - const_convs) / const_convs * 100) if const_convs > 0 else 0
     roi_lift = ((roi - const_roi) / const_roi * 100) if const_roi > 0 else 0
     
-    logger.info(f"\nLIFT vs Constant Bidding:")
+    logger.info("\nLIFT vs Constant Bidding:")
     logger.info(f"  Click Lift: {click_lift:+.1f}%")
     logger.info(f"  Conv Lift:  {conv_lift:+.1f}%")
     logger.info(f"  ROI Lift:   {roi_lift:+.1f}%")
@@ -192,7 +192,7 @@ def run_backtest():
     logger.info(f"\nStatistically Significant Improvement: {'YES' if significant else 'NO'}")
     
     # Target Check
-    logger.info(f"\n--- Phase 7 TARGET CHECK ---")
+    logger.info("\n--- Phase 7 TARGET CHECK ---")
     logger.info(f"CTR AUC >= 0.62: {'✅ PASS' if ctr_auc >= 0.62 else '❌ FAIL'} ({ctr_auc:.4f})")
     logger.info(f"CVR AUC >= 0.58: {'✅ PASS' if cvr_auc >= 0.58 else '❌ FAIL'} ({cvr_auc:.4f})")
     logger.info(f"Latency < 5ms:   {'✅ PASS' if latency_ctr < 5 else '❌ FAIL'} ({latency_ctr:.4f}ms)")

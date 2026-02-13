@@ -8,23 +8,19 @@ Phase 11: Real-Time Market & Signal Realism
 4. Delayed Feedback Modeling
 5. Game-Theoretic Competitor Reaction (10-round)
 """
-import sys, os, time, warnings, logging, json
-from datetime import datetime
-from collections import deque
+import sys, os, warnings, logging
 import numpy as np
-import pandas as pd
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.abspath("."))
 
 from sklearn.metrics import roc_auc_score
 from scipy.sparse import vstack
-from scipy import stats as sp_stats
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-from src.training.train import load_dataset, build_matrix, FeatureExtractor, HASH_SPACE
+from src.training.train import load_dataset, build_matrix, FeatureExtractor
 from src.bidding.config import config
 
 try:
@@ -85,7 +81,8 @@ def run_backtest(pCTR, prices, y_click, y_conv, ev_pct=70, budget_frac=0.8):
         if ev_pct > 0 and ev[i] < ev_thresh:
             continue
         if spend + mp <= BUDGET and ev[i] >= mp:
-            spend += mp; wins += 1
+            spend += mp
+            wins += 1
             if y_click[i]: clicks += 1
             if y_conv[i]: convs += 1
     return {"roi": calc_roi(clicks, convs, spend), "spend": spend, "budget": BUDGET,
@@ -204,7 +201,8 @@ def task2_pareto(X, y_ctr, y_cvr, prices):
         for i in range(n_te):
             mp = prices_te[i]
             if spend + mp <= BUDGET and bid_adj[i] >= mp:
-                spend += mp; wins += 1
+                spend += mp
+                wins += 1
                 if y_click_te[i]: clicks += 1
                 if y_conv_te[i]: convs += 1
         roi = calc_roi(clicks, convs, spend)
@@ -302,10 +300,16 @@ def task3_adaptive_gate(X, y_ctr, y_cvr, prices):
         for i in range(h_start, h_end):
             mp = prices_48[i]
             if ev_48[i] >= gate_thresh and cum_spend + mp <= BUDGET and ev_48[i] >= mp:
-                cum_spend += mp; hour_spend += mp
-                hour_wins += 1; cum_wins += 1
-                if y_click_48[i]: hour_clicks += 1; cum_clicks += 1
-                if y_conv_48[i]: hour_convs += 1; cum_convs += 1
+                cum_spend += mp
+                hour_spend += mp
+                hour_wins += 1
+                cum_wins += 1
+                if y_click_48[i]:
+                    hour_clicks += 1
+                    cum_clicks += 1
+                if y_conv_48[i]:
+                    hour_convs += 1
+                    cum_convs += 1
 
         # Compute error signals
         elapsed_frac = (hour + 1) / HOURS
@@ -427,7 +431,7 @@ def task4_delayed_feedback(X, y_ctr, y_cvr, prices):
     roi_bias_naive = (naive_roi - true_roi) / max(true_roi, 1e-6) * 100
     roi_bias_corrected = (corrected_roi - true_roi) / max(true_roi, 1e-6) * 100
 
-    logger.info(f"\n  Delay Parameters:")
+    logger.info("\n  Delay Parameters:")
     logger.info(f"    Click delay: Exp(μ=30min), P(observe)={p_click_obs:.3f}")
     logger.info(f"    Conv delay:  Exp(μ=4h),    P(observe)={p_conv_obs:.3f}")
     logger.info(f"    Observation window: {observation_window} min")
@@ -514,12 +518,14 @@ def task5_game_theory(X, y_ctr, y_cvr, prices):
             if our_bid >= comp_bid and our_bid >= mp:
                 # We win
                 if our_spend + mp <= BUDGET:
-                    our_spend += mp; our_wins += 1
+                    our_spend += mp
+                    our_wins += 1
                     if y_click_te[i]: our_clicks += 1
                     if y_conv_te[i]: our_convs += 1
             elif comp_bid >= mp:
                 # Competitor wins
-                comp_spend += mp; comp_wins += 1
+                comp_spend += mp
+                comp_wins += 1
                 if y_click_te[i]: comp_clicks += 1
                 if y_conv_te[i]: comp_convs += 1
 
@@ -568,7 +574,7 @@ def task5_game_theory(X, y_ctr, y_cvr, prices):
 
     # Equilibrium analysis
     final = rounds[-1]
-    logger.info(f"\n  Final State (Round 10):")
+    logger.info("\n  Final State (Round 10):")
     logger.info(f"    Our WinRate: {final['our_wr']:.1%}, ROI: {final['our_roi']:.4f}")
     logger.info(f"    Comp WinRate: {final['comp_wr']:.1%}, ROI: {final['comp_roi']:.4f}")
     logger.info(f"    Comp Multiplier: {final['comp_mult']:.3f}× (started at 1.0×)")
