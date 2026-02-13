@@ -1,8 +1,6 @@
 import logging
-import time
 import random
 from src.bidding.engine import BiddingEngine
-from src.bidding.schema import BidRequest
 from src.simulation.replay import AuctionSimulator, generate_mock_stream
 
 logger = logging.getLogger("StressTest")

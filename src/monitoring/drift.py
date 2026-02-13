@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Dict
+from typing import List
 
 def calculate_psi(expected: List[float], actual: List[float], bucket_type: str = "bins", buckets: int = 10, axis: int = 0) -> float:
     """
@@ -16,7 +16,7 @@ def calculate_psi(expected: List[float], actual: List[float], bucket_type: str =
         - 0.1 - 0.2: Moderate shift.
         - > 0.2: Significant shift.
     """
-    def scale_range (input, min, max):
+    def scale_range(input, min, max):
         input += -(np.min(input))
         input /= np.max(input) / (max - min)
         input += min

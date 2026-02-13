@@ -1,8 +1,7 @@
-import itertools
 import logging
-import os
+import random
+from dataclasses import dataclass
 from typing import Dict, Any
-from dataclasses import replace
 
 from src.bidding.config import config
 from src.bidding.engine import BiddingEngine
@@ -108,7 +107,7 @@ def run_grid_search():
     values = list(GRID_SEARCH_SPACE.values())
     combinations = list(itertools.product(*values))
     
-    logger.info(f"Starting Grid Search with {len(combinations)} candidates...")
+    logger.info("Starting Grid Search with {} candidates...".format(len(combinations)))
     
     results = []
     for i, combo in enumerate(combinations):

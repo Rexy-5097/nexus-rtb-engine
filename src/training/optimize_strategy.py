@@ -5,7 +5,7 @@ import os
 import random
 import numpy as np
 import pandas as pd
-from typing import Dict, List
+from typing import Dict
 import pickle
 
 # Setup path

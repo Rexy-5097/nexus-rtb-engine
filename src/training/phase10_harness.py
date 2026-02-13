@@ -8,24 +8,17 @@ Phase 10: Institutional-Grade Optimization
 4. Competitor Modeling (Win-Prob + Bid Shading)
 5. Shadow Deployment Harness (24h Campaign Simulation)
 """
-import sys, os, time, pickle, json, warnings, logging
-from datetime import datetime, timedelta
-from collections import deque
+import sys, os, warnings, logging
 import numpy as np
 import pandas as pd
+from collections import deque
+from scipy.sparse import vstack
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.abspath("."))
 
-from sklearn.metrics import roc_auc_score, brier_score_loss
-from sklearn.isotonic import IsotonicRegression
-from scipy.sparse import csr_matrix, vstack
-from scipy import stats as sp_stats
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger(__name__)
-
-from src.training.train import load_dataset, build_matrix, FeatureExtractor, HASH_SPACE, calc_ece
+from sklearn.metrics import roc_auc_score
+from src.training.train import load_dataset, build_matrix, FeatureExtractor
 from src.bidding.config import config
 
 try:
