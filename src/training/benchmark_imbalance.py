@@ -15,7 +15,7 @@ sys.path.append(os.getcwd())
 # However, "load_dataset" is not exposed in the truncated version unless I restored it correctly.
 # Assuming I restored it correctly in last step.
 try:
-    from src.training.train import load_dataset, FeatureExtractor, build_matrix, global_stats, scaler
+    from src.training.train import load_dataset, FeatureExtractor, build_matrix
 except ImportError:
     # If explicit import fails, maybe relative? 
     # Or redefine minimal helpers.

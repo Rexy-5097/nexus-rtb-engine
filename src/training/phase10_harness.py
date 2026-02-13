@@ -10,9 +10,11 @@ Phase 10: Institutional-Grade Optimization
 """
 import sys, os, warnings, logging
 import numpy as np
-import pandas as pd
 from collections import deque
 from scipy.sparse import vstack
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.abspath("."))

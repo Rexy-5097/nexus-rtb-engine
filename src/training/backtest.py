@@ -8,13 +8,11 @@ eCPC, eCPA, Latency, and comparison vs Constant Bidding baseline.
 """
 import sys, os, time, pickle, logging
 import numpy as np
-import pandas as pd
 from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, os.path.abspath("."))
 
 from src.training.train import load_dataset, build_matrix, FeatureExtractor
-from scipy.sparse import csr_matrix
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
