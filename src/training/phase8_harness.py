@@ -258,7 +258,7 @@ def task2_regularization_sweep(X, y_ctr):
     logger.info("  Top 5 Configs (by lowest gap):")
     for i, r in enumerate(results[:5]):
         logger.info(f"    {i+1}. L1={r['l1']}, L2={r['l2']}, FF={r['ff']}, BF={r['bf']} → "
-                     f"Train={r['train']:.4f}, Test={r['test']:.4f}, Gap={r['gap']:.4f}")
+                    f"Train={r['train']:.4f}, Test={r['test']:.4f}, Gap={r['gap']:.4f}")
     
     logger.info(f"  BEST: Gap={best_gap:.4f}, Test AUC={best_test_auc:.4f}")
     logger.info(f"  Config: {best_config}")
