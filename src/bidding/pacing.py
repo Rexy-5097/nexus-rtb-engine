@@ -65,68 +65,71 @@ class PacingController:
         with self._lock:
             return self._total_budget - self._spent_budget
 
-    def can_bid(self) -> bool:
+    def reserve_budget(self, amount: float) -> bool:
         """
-        Check if we are allowed to bid based on hard budget caps.
+        Atomically check and reserve budget.
+        Returns True if reservation succeeded, False if budget exhausted.
+        Replaces can_bid() + record_bid() to prevent TOCTOU race conditions.
         """
         with self._lock:
             # 1. Global Hard Cap
-            if self._spent_budget >= self._total_budget:
+            if self._spent_budget + amount > self._total_budget:
                 return False
 
-            # 2. Daily Hard Cap (Redundant if total_budget is daily, but safe)
-            if self._spent_budget >= self.conf.max_daily_spend:
+            # 2. Daily Hard Cap
+            if self._spent_budget + amount > self.conf.max_daily_spend:
                 return False
 
             # 3. Hourly Soft Cap
-            if self._hourly_spend >= self.conf.max_hourly_spend:
+            if self._hourly_spend + amount > self.conf.max_hourly_spend:
                 if time.time() - self._last_hour_reset < 3600:
                     return False
                 else:
                     self._reset_hourly()
 
             # 4. Surge Protection (Minute Cap)
-            if self._minute_spend >= self.conf.max_minute_spend:
+            if self._minute_spend + amount > self.conf.max_minute_spend:
                 if time.time() - self._last_minute_reset < 60:
                     return False
                 else:
                     self._reset_minute()
-                    
+            
+            # Commit Reservation
+            self._spent_budget += amount
+            self._hourly_spend += amount
+            self._minute_spend += amount
+            
+            # Track Request
+            self._requests_seen += 1
+            self._decisions_total += 1
+            self._win_history.append(0) # Assume loss until notified
+            
             return True
 
-    def record_bid(self, bid_price: float):
+    def refund_budget(self, amount: float):
         """
-        Deduct estimated spend and track decision.
-        Must be called when a bid is placed.
+        Refund reserved budget (e.g. if bid rejected by floor price or error).
         """
         with self._lock:
-            # Deduct estimated spend (Atomic)
-            # We assume a win rate for deduction to avoid blocking budget 
-            # OR we deduct full bid price? 
-            # "When estimating spend: Deduct estimated_spend atomically"
-            # Standard is bid_price * estimated_win_rate (pessimistic estimate)
-            estimated_cost = bid_price * self.conf.estimated_win_rate
+            self._spent_budget -= amount
+            self._hourly_spend -= amount
+            self._minute_spend -= amount
             
-            self._spent_budget += estimated_cost
-            self._hourly_spend += estimated_cost
-            self._minute_spend += estimated_cost
-            
-            self._requests_seen += 1
-            
-            # Track decision for win rate logic
-            # We add 'False' initially? Or just track bids count?
-            # "wins / bids"
-            self._decisions_total += 1
-            # We push '0' (loss) to history? No, wait for outcome?
-            # If we don't get outcome, we assume loss. 
-            # If we get outcome, we update?
-            # Standard pattern: We add to history when we know the outcome?
-            # Or we track count of Bids. And count of Wins.
-            # Win Rate = Wins / Bids.
-            # Only keep last 10k decisions? 
-            # Actually, "Sliding window of last 10k decisions". 
-            # This usually means 10k *bids*.
-            self._win_history.append(0) # Assume loss until notified?
+            # Revert stats?
+            # We don't revert requests_seen as we did process it, just didn't bid.
+            # We might want to remove the '0' from win history if we didn't actually bid?
+            # Yes, pop the last '0'.
+            if self._win_history and self._win_history[-1] == 0:
+                self._win_history.pop()
+                self._decisions_total -= 1
+
+    def can_bid(self) -> bool:
+        """DEPRECATED: Use reserve_budget"""
+        return self.reserve_budget(0.0)
+
+    def record_bid(self, bid_price: float):
+        """DEPRECATED: Use reserve_budget"""
+        pass
 
     def record_win(self, price: float):
         """

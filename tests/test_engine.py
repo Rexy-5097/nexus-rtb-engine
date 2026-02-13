@@ -115,3 +115,11 @@ def test_quality_gate(engine, valid_request):
             # In new logic: ROI guard or Pacing happens first.
             # EV ~ 0. Alpha ~ Init. Bid ~ 0.
             # Likely hits 'below_min_bid'
+
+def test_fail_closed_model(engine, valid_request):
+    """Ensure engine returns 0 if model is not loaded."""
+    # Force model_loaded = False
+    with patch.object(engine.model_loader, 'model_loaded', False):
+        response = engine.process(valid_request)
+        assert response.bidPrice == 0
+        assert response.explanation == "model_not_loaded"

@@ -211,10 +211,15 @@ def fetch_existing(conn, table_name, bidids):
     cur = conn.cursor()
     if not bidids:
         return found
+    
+    # Validate table_name to prevent SQLi via table name interpolation
+    if table_name not in ("clicks", "convs"):
+        raise ValueError(f"Invalid table name: {table_name}")
+
     for i in range(0, len(bidids), SQLITE_QUERY_BATCH):
         batch = bidids[i : i + SQLITE_QUERY_BATCH]
         placeholders = ",".join("?" for _ in batch)
-        # Safe parameterized query
+        # Safe parameterized query with validated table name
         cur.execute(
             f"SELECT bidid FROM {table_name} WHERE bidid IN ({placeholders})",
             batch,

@@ -58,9 +58,8 @@ class BiddingEngine:
         adv_id = str(request.advertiserId)
         
         try:
-            # FIX 1 & 5: Circuit Breaker with Thread Safety
-            if not self.pacing.can_bid():
-                return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="pacing_limited")
+            # FIX 1 & 5: Circuit Breaker moved to atomic reservation
+            # Old can_bid check removed to prevent TOCTOU
 
             # FIX 2: Fail-Closed Model Loading
             if not self.model_loader.model_loaded:
@@ -113,20 +112,10 @@ class BiddingEngine:
                  # So we cap it or reject? User said "return -1" (Reject).
                  return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="roi_safety_violation")
 
+
             # FIX 3: Bid Shading
-            # Get shading factor (Win Rate based) + PID Alpha
-            # User said "Apply: raw_bid *= shading" where shading is from win rate.
-            # PID is usually separate. Let's combine:
-            # PID regulates *Velocity*. Shading regulates *Win Rate*.
-            # We use PID alpha as base * Shading? 
-            # Or PID alpha *is* the shading?
-            # User instruction: "shading = min(1.0, target_win_rate / max(observed_win_rate, 0.01))"
-            # This is specifically for win-rate targeting.
             shading_factor = self.pacing.get_shading_factor()
-            
-            # We also have PID alpha for budget. 
-            # Usually: Bid = EV * Shading * Alpha.
-            pid_alpha = self.pacing.update(ev) # This updates PID state
+            pid_alpha = self.pacing.update(ev) 
             
             final_bid_float = ev * shading_factor * pid_alpha
 
@@ -139,17 +128,29 @@ class BiddingEngine:
                 
             final_bid = int(final_bid_float)
             
-            if final_bid < floor:
-                return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="below_floor")
-            
             if final_bid > config.max_bid_price:
                 final_bid = config.max_bid_price
-            
-            # Record the bid for budget tracking
-            if final_bid >= config.min_bid_price:
-                 self.pacing.record_bid(final_bid)
-            else:
+
+            # FIX 1: Atomic Reservation (TOCTOU Fix)
+            # Calculate reservation amount (Expectation-based)
+            if final_bid < config.min_bid_price:
                  return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="below_min_bid")
+
+            reserved_amount = final_bid * config.pacing.estimated_win_rate
+            
+            # Try to reserve budget
+            # This replaces the old 'can_bid' check at the start
+            if not self.pacing.reserve_budget(reserved_amount):
+                 return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="pacing_limited")
+
+            # Floor Check (Post-Reservation -> Need Refund if fails)
+            if final_bid < floor:
+                self.pacing.refund_budget(reserved_amount)
+                return BidResponse(bidId=request.bidId, bidPrice=0, advertiserId=adv_id, explanation="below_floor")
+            
+            # If we get here, budget is reserved and bid is valid
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            return BidResponse(bidId=request.bidId, bidPrice=final_bid, advertiserId=adv_id, explanation=f"ok_lat={latency_ms:.3f}ms")
 
             latency_ms = (time.perf_counter() - start_time) * 1000
             return BidResponse(bidId=request.bidId, bidPrice=final_bid, advertiserId=adv_id, explanation=f"ok_lat={latency_ms:.3f}ms")
