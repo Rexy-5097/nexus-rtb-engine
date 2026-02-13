@@ -27,13 +27,15 @@ class ModelLoader:
         """
         self.model_path = model_path
         
-        # State: Model Parameters (Default: Safe Intercepts)
+        # State: Model Parameters
         self.weights_ctr: Optional[np.ndarray] = None
         self.weights_cvr: Optional[np.ndarray] = None
-        # Start with ULTRA conservative values (Fail-Closed)
-        self.intercept_ctr: float = config.model.default_intercept_ctr
-        self.intercept_cvr: float = config.model.default_intercept_cvr
+        self.intercept_ctr: float = 0.0
+        self.intercept_cvr: float = 0.0
         self.stats: Dict[str, Any] = {}
+        
+        # FAIL-CLOSED FLAG
+        self.model_loaded = False
         
         # Immediate load attempts
         self._load_safe()
@@ -43,7 +45,8 @@ class ModelLoader:
         Attempt to load the model with strict security and validation checks.
         """
         if not os.path.exists(self.model_path):
-            logger.error(f"Model artifact not found: {self.model_path}. Running in Fail-Safe mode.")
+            logger.error(f"Model artifact not found: {self.model_path}. Engine DISABLED.")
+            self.model_loaded = False
             return
 
         # Strategy 1: NumPy (.npz) - SAFE
@@ -57,14 +60,12 @@ class ModelLoader:
             return
             
         logger.error(f"Unknown model format: {self.model_path}")
+        self.model_loaded = False
 
     def _load_numpy(self):
         """Load from safe .npz format."""
         try:
             with np.load(self.model_path, allow_pickle=False) as data:
-                # Validate and assign logic similar to pickle
-                # Expecting arrays: ctr_coef, ctr_intercept, cvr_coef, cvr_intercept
-                
                 # CTR
                 if "ctr_coef" in data and "ctr_intercept" in data:
                     ctr_coef = data["ctr_coef"]
@@ -79,30 +80,43 @@ class ModelLoader:
                         self.weights_cvr = cvr_coef
                         self.intercept_cvr = float(data["cvr_intercept"])
                         
-                logger.info("Model loaded from .npz successfully.")
+                # If we got here, we are good? 
+                # Strict check: Must have both? Or at least CTR?
+                if self.weights_ctr is not None:
+                     self.model_loaded = True
+                     logger.info("Model loaded from .npz successfully.")
+                else:
+                     logger.error("Model .npz missing critical weights.")
+                     self.model_loaded = False
+
         except Exception as e:
             logger.critical(f"Failed to load .npz model: {e}", exc_info=True)
-            self._reset_defaults()
+            self.model_loaded = False
 
     def _load_pickle_secure(self):
         """Load legacy pickle with signature enforcement."""
         sig_path = f"{self.model_path}.sig"
         if not ModelIntegrity.verify_signature(self.model_path, sig_path):
             logger.critical("SECURITY ALERT: Model signature verification failed. Refusing to load.")
+            self.model_loaded = False
             return
 
         try:
             with open(self.model_path, "rb") as f:
                 data = pickle.load(f)
-            self._parse_and_validate(data)
-            logger.info("Legacy model loaded from .pkl (Verified).")
+            if self._parse_and_validate(data):
+                self.model_loaded = True
+                logger.info("Legacy model loaded from .pkl (Verified).")
+            else:
+                self.model_loaded = False
         except Exception as e:
             logger.critical(f"Fatal error loading legacy model: {e}", exc_info=True)
-            self._reset_defaults()
+            self.model_loaded = False
 
-    def _parse_and_validate(self, data: Dict[str, Any]) -> None:
+    def _parse_and_validate(self, data: Dict[str, Any]) -> bool:
         """Validate tensor shapes from dict."""
         expected_dim = config.model.hash_space
+        valid_ctr = False
 
         # CTR Model
         if "ctr" in data:
@@ -111,7 +125,8 @@ class ModelLoader:
             
             if self._validate_shape(coef, expected_dim):
                 self.weights_ctr = coef.flatten()
-                self.intercept_ctr = float(intercept[0]) if intercept is not None else config.model.default_intercept_ctr
+                self.intercept_ctr = float(intercept[0]) if intercept is not None else 0.0
+                valid_ctr = True
 
         # CVR Model
         if "cvr" in data:
@@ -120,11 +135,27 @@ class ModelLoader:
             
             if self._validate_shape(coef, expected_dim):
                 self.weights_cvr = coef.flatten()
-                self.intercept_cvr = float(intercept[0]) if intercept is not None else config.model.default_intercept_cvr
+                self.intercept_cvr = float(intercept[0]) if intercept is not None else 0.0
                 
         # Metadata
         if "stats" in data:
             self.stats = data["stats"]
+            
+        return valid_ctr
+
+    @staticmethod
+    def _validate_shape(coef: Any, expected_dim: int) -> bool:
+        if coef is None: return False
+        try:
+            shape = coef.shape
+            if len(shape) == 1 and shape[0] == expected_dim: return True
+            if len(shape) == 2 and shape[1] == expected_dim: return True
+            return False
+        except Exception:
+            return False
+
+    def get_stats(self, advertiser_id: str) -> Dict[str, float]:
+        return self.stats.get(str(advertiser_id), {"avg_mp": 50.0, "avg_ev": 0.001})
 
     @staticmethod
     def _validate_shape(coef: Any, expected_dim: int) -> bool:
