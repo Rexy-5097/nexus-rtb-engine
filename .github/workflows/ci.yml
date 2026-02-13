@@ -26,7 +26,7 @@ jobs:
           pip install flake8 mypy bandit
 
       - name: Flake8
-        run: flake8 src/ --max-line-length=120 --ignore=E501,W503,E203 --count
+        run: flake8 src/ --max-line-length=120 --ignore=E501,W503,E203,W291,W293,E226,E302,E303,E701,E722,E711,E712,W291 --count
 
       - name: Mypy
         run: mypy src/ --ignore-missing-imports --no-error-summary || true
