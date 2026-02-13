@@ -208,10 +208,10 @@ def task1_ablation(X, y_ctr, y_cvr, prices):
     numeric_feature_hashes = {}
     hash_space = config.model.hash_space
     for name in ["stat_adv_ctr", "stat_adv_dom_ctr", "adv_ctr_1d", "adv_ctr_7d",
-                  "dom_ctr_1d", "dom_ctr_7d", "adv_win_rate", "adv_avg_cpm", "slot_ctr",
-                  "user_ctr", "user_click_count_7d", "domain_freq",
-                  "ua_entropy", "hour_sin", "hour_cos",
-                  "ad_slot_area", "adslot_visibility", "adslot_format"]:
+        "dom_ctr_1d", "dom_ctr_7d", "adv_win_rate", "adv_avg_cpm", "slot_ctr",
+        "user_ctr", "user_click_count_7d", "domain_freq",
+        "ua_entropy", "hour_sin", "hour_cos",
+        "ad_slot_area", "adslot_visibility", "adslot_format"]:
         h = hash_feature(name, hash_space)
         numeric_feature_hashes[name] = h
 

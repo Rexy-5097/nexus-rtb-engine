@@ -21,7 +21,6 @@ except ImportError:
     lgb = None
 
 from src.bidding.config import config
-from src.utils.hashing import Hasher
 from src.bidding.features import FeatureExtractor
 
 # Setup logging
@@ -173,11 +172,11 @@ def iter_chunks(item, usecols=None):
                  with zf.open(item["entry"]) as f:
                      text = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
                      for chunk in pd.read_csv(text, sep="\t", header=None, chunksize=CHUNK_SIZE, usecols=usecols, 
-                                            dtype=str, on_bad_lines="skip", low_memory=True):
+                                              dtype=str, on_bad_lines="skip", low_memory=True):
                          yield chunk
         else:
              for chunk in pd.read_csv(item["path"], sep="\t", header=None, chunksize=CHUNK_SIZE, usecols=usecols, 
-                                    dtype=str, on_bad_lines="skip", low_memory=True):
+                                      dtype=str, on_bad_lines="skip", low_memory=True):
                  yield chunk
     except Exception as e:
         logger.error(f"Error reading {item['display']}: {e}")
@@ -220,6 +219,7 @@ def build_matrix(rows, clicked_mask, conv_mask, stats_map, feature_extractor, sc
         __slots__ = ('bidId', 'timestamp', 'visitorId', 'userAgent', 'region', 'city', 'domain', 'adSlotVisibility', 'adSlotFormat', 'adSlotFloorPrice', 'advertiserId', 'adSlotWidth', 'adSlotHeight',
                      'adv_ctr_1d', 'adv_ctr_7d', 'dom_ctr_1d', 'dom_ctr_7d', 'slot_ctr',
                      'user_ctr', 'user_count_7d')
+
         def __init__(self, r):
             self.bidId = r.bidid
             self.timestamp = r.timestamp
@@ -689,7 +689,7 @@ def main():
             # logger.info(f"Evaluating LR(C={C}, class_weight={class_weight})...")
             try:
                 model = LogisticRegression(solver="saga", penalty="elasticnet", l1_ratio=0.5, C=C, 
-                                         class_weight=class_weight, max_iter=100, random_state=42)
+                                           class_weight=class_weight, max_iter=100, random_state=42)
                 model.fit(X_t, y_t)
                 probs = model.predict_proba(X_v)[:, 1]
                 auc = roc_auc_score(y_v, probs)
