@@ -40,7 +40,7 @@ graph TD
 
 Nexus-RTB prioritizes **financial safety** and **economic rationality** over raw volume.
 
-### 1. expected Value (EV) Bidding
+### 1. Expected Value (EV) Bidding
 
 We use a dual-prediction model to estimate the unified value of an impression:
 
@@ -70,6 +70,16 @@ The engine implements an atomic "Circuit Breaker" to guarantee budget compliance
 - **Daily Hard Cap**: \$25,000,000 (Global limit)
 - **Hourly Soft Cap**: \$2,000,000 (Prevents early exhaustion)
 - **Surge Protection**: \$50,000/minute (Dampens DDOS/Bot traffic)
+
+---
+
+## Economic Safety Guarantees
+
+- **Hard Budget Cap Enforcement**: Atomic check of `total_budget` vs `spent_budget` ensures strictly bounded spend.
+- **Fail-Closed Model Loading**: Bidding is strictly disabled (`bid=0`) if model artifacts fail integrity checks or are missing.
+- **Adaptive Bid Shading**: Win-rate targeting (40%) dynamically shades bids (`raw_bid * shading`) to optimize spend efficiency using `min(1.0, target / observed)`.
+- **ROI Guard**: Prevents negative EV bidding by validating `ExpectedValue` against `Average Market Price`.
+- **Thread-Safety**: All financial state transitions in `PacingController` are protected by `threading.Lock`.
 
 ---
 

@@ -1,27 +1,22 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## v2.0.0 – Economic Hardening Release
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+### Critical Safety Upgrades
 
-## [1.0.0] - 2026-02-13
+- **Budget Cap Enforcement**: Added atomic, thread-safe tracking of `total_budget`, `remaining_budget`, and `spent_budget`. Circuit breaker engages immediately upon exhaustion.
+- **Fail-Closed Model Loading**: Engine now refuses to answer bids if model artifacts are missing or fail integrity checks (Fail-Safe).
+- **Adaptive Shading**: Implemented dynamic bid shading based on rolling win-rate observation (Target: 40%).
+- **ROI Safety Checks**: Added guardrail ensuring `ExpectedValue` justifies the `RawBid` relative to market price.
+- **Concurrency Hardening**: `PacingController` now uses `threading.Lock` for all state mutations.
 
-### Added
+### Features
 
-- **CI/CD**: GitHub Actions workflow for automated testing and latency benchmarking.
-- **Monitoring**: Full Prometheus + Grafana stack (`docker-compose.yml`) with pre-provisioned dashboards.
-- **Model Integrity**: SHA256 signature verification for model weights (`src/utils/crypto.py`).
-- **Telemetry**: Instrumented `deploy/app.py` with `prometheus_client`.
-- **Documentation**: New `MONITORING.md`, `MODEL_INTEGRITY.md`, updated `ARCHITECTURE.md`.
+- **Engine**: Expected Value (EV) valuation logic: $Bid = \alpha \cdot (pCTR \cdot V_{click} + pCVR \cdot V_{conv})$.
+- **Pacing**: PID Controller integration for velocity smoothing.
+- **Security**: `.npz` model loading (NumPy) preferred over Pickle.
 
-### Changed
+### Breaking Changes
 
-- **Architecture**: Refactored monolithic code into modular `src/bidding`, `src/utils`.
-- **Safety**: Replaced raw pickle loading with signature-verified loading.
-- **Performance**: Optimized feature extraction; verified <4µs latency.
-
-### Security
-
-- Added `scripts/sign_model.py` for generating model signatures.
-- Enforced strict model loading policy (Fail-Closed).
+- `process()` now strictly returns `0` (No Bid) on all errors or safety violations.
+- `EngineConfig` structure updated with strict budget fields.
