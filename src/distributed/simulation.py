@@ -3,7 +3,7 @@ import time
 import random
 import logging
 from src.distributed.budget_coordinator import BudgetCoordinator
-from src.bidding.pacing import PacingController
+
 # Mock engine for distributed test to avoid heavy ML loading
 # In real distributed test we'd spawn processes, but threads are fine for logic check.
 

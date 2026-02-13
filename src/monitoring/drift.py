@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Tuple
+from typing import List, Dict
 
 def calculate_psi(expected: List[float], actual: List[float], bucket_type: str = "bins", buckets: int = 10, axis: int = 0) -> float:
     """
@@ -55,9 +55,9 @@ class DriftDetector:
         self.window = []
         self.window_size = window_size
         
-    def update(self, value: float) -> float:
+    def add(self, p_ctrs: float) -> float:
         """Add value and return current PSI."""
-        self.window.append(value)
+        self.window.append(p_ctrs)
         if len(self.window) > self.window_size:
             self.window.pop(0)
             

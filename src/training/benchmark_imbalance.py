@@ -7,7 +7,6 @@ import pandas as pd
 from scipy.sparse import vstack
 from sklearn.metrics import roc_auc_score
 import lightgbm as lgb
-import warnings
 
 # Add src to path
 sys.path.append(os.getcwd())
@@ -29,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 def benchmark():
     logger.info("Loading Data...")
-    from src.training.train import load_dataset, FeatureExtractor, build_matrix
     
     # We call load_dataset which returns full_df etc.
     full_df, global_stats, scaler, stats = load_dataset()

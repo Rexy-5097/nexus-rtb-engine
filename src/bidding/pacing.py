@@ -1,7 +1,7 @@
 import threading
 import time
 import logging
-from typing import Dict, Tuple
+from typing import Dict
 
 from src.bidding.config import config
 

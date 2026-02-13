@@ -1,6 +1,6 @@
 import numpy as np
 import logging
-from typing import List, Tuple
+from typing import List
 from sklearn.metrics import log_loss, brier_score_loss
 
 logger = logging.getLogger(__name__)

@@ -61,6 +61,7 @@ def run_backtest():
     paying_prices = full_df['payingprice'].values.astype(float)
     
     # Time-based Split: Use only TEST set for backtest (last 15%)
+    print("  [Using standard test split for backtest]")
     n = X_full.shape[0]
     n_train = int(n * 0.70)
     n_val = int(n * 0.15)

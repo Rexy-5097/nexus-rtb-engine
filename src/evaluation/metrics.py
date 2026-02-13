@@ -1,6 +1,6 @@
 import numpy as np
 from sklearn.metrics import roc_auc_score, log_loss, brier_score_loss
-from typing import Dict, List, Any
+from typing import Dict, List
 
 def calculate_metrics(
     y_true: List[int],
