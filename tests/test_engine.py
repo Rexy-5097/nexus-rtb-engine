@@ -75,30 +75,34 @@ def test_floor_price_rejection(engine, valid_request):
     with patch("src.bidding.engine.config", relaxed_config):
         with patch.object(engine.model_loader, 'intercept_ctr', -2.0):
              with patch.object(engine.model_loader, 'intercept_cvr', -2.0):
-                valid_request.adSlotFloorPrice = "5000"
-                # We need to re-init engine if it reads config at init? 
-                # No, engine reads config at runtime (process method).
-                # BUT 'engine' fixture is already created with the REAL config imported at module level.
-                # 'from src.bidding.config import config' inside engine.py
-                # patch("src.bidding.engine.config") should work on the MODULE level variable.
-                
-                response = engine.process(valid_request)
-                assert response.bidPrice == 0
-                assert response.explanation == "below_floor"
+                with patch.object(engine.model_loader, 'model_loaded', True):
+                    # Mock get_stats to return high avg_mp so we pass ROI guard (Fix 4)
+                    with patch.object(engine.model_loader, 'get_stats', return_value={"avg_mp": 500.0, "avg_ev": 50.0}):
+                        # EV ~ 13.0. Score ~ 0.12. Threshold = 0.12 * 500 = 60.
+                        # 60 > 13.0 -> OK.
+                        # Floor is 5000. Bid < 5000.
+                        valid_request.adSlotFloorPrice = "5000"
+                        response = engine.process(valid_request)
+                        assert response.bidPrice == 0
+                        assert response.explanation == "below_floor"
 
 def test_roi_guard(engine, valid_request):
     """Ensure bids with bad ROI are skipped."""
     # Mock model to return moderate pCTR but ZERO conversion, leading to bad CPA calc
     with patch.object(engine.model_loader, 'intercept_ctr', -1.0):
         with patch.object(engine.model_loader, 'intercept_cvr', -10.0): # ~0 conversion
-             # This depends on config.max_cpa and EV formula
-             # p_conv ~ 0. EV ~ pCTR * Vc. 
-             # Predicted CPA = EV / p_conv -> HUGE.
-             # This should trigger roi_guard_cpa
-            response = engine.process(valid_request)
-            # If p_cvr is truly 0, p_conv_imp is 0, check might be skipped if p_conv > 0 condition holds
-            # We need p_conv small but positive to trigger CPA check
-            pass 
+             with patch.object(engine.model_loader, 'model_loaded', True):
+                 # Predicted CPA = EV / p_conv -> HUGE.
+                response = engine.process(valid_request)
+                # Should NOT bid
+                assert response.bidPrice == 0
+                # explanation could be roi_safety_violation or old roi_guard_cpa depending on logic match
+                # I kept only one ROI guard in previous turn? 
+                # No, I implemented Fix 4 (roi_safety_violation) but kept CPA check (Fix 5)?
+                # Wait, I replaced the whole `try` block. I only kept Fix 4 logic. 
+                # Let's check `engine.py` content again.
+                # I replaced lines 44-131. The new content effectively checks ROI using the custom_score logic.
+                pass 
 
 def test_quality_gate(engine, valid_request):
     """Ensure low EV bids are rejected."""
